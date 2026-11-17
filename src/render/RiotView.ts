@@ -50,6 +50,18 @@ export class RiotView {
   private readonly particles = new VoxelParticles(4000);
   /** Nube de gas lacrimógeno: translúcida para que se vea lo que pasa dentro (palizas, arrestos). */
   private readonly gasFx = new VoxelParticles(2500, 0.32);
+  /** Láser rojo de los francotiradores mientras apuntan (con mano dura). */
+  private readonly aimGeometry = new THREE.BufferGeometry();
+  private readonly aimMaterial = new THREE.LineBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.7, depthWrite: false });
+  private readonly aimLines = new THREE.LineSegments(this.aimGeometry, this.aimMaterial);
+  private readonly aimPositions = new Float32Array(16 * 6);
+  /** Colectivo escondido: se ve translúcido (solo para ti). */
+  private readonly hiddenMaterial = (() => {
+    const m = VOXEL_MATERIAL.clone();
+    m.transparent = true;
+    m.opacity = 0.45;
+    return m;
+  })();
   private readonly ringGeometry = new THREE.RingGeometry(1, 1.18, 32);
   private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.9 });
   private readonly markerMaterial = new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true });
@@ -136,6 +148,10 @@ export class RiotView {
     this.scene.add(this.particles.mesh);
     this.gasFx.mesh.renderOrder = 4;
     this.scene.add(this.gasFx.mesh);
+    this.aimGeometry.setAttribute('position', new THREE.BufferAttribute(this.aimPositions, 3));
+    this.aimLines.frustumCulled = false;
+    this.aimLines.renderOrder = 5;
+    this.scene.add(this.aimLines);
 
     this.moveMarker = new THREE.Mesh(this.ringGeometry, this.markerMaterial);
     this.moveMarker.rotation.x = -Math.PI / 2;
@@ -226,33 +242,6 @@ export class RiotView {
           break;
         case 'disperse':
           fx.burst(e.x, 1.8, e.z, 2, 0xffffff, 1.5, 0.12, 0.5);
-          break;
-        case 'bite':
-          fx.burst(e.x, 0.6, e.z, 4, 0xdc2626, 1.5, 0.1, 0.35); // mordisco
-          break;
-        case 'pepper': {
-          // Chorro de pimienta: cubitos naranjas en cono hacia delante.
-          const dx = e.toX - e.fromX;
-          const dz = e.toZ - e.fromZ;
-          for (let k = 0; k < 10; k++) {
-            const sp = 0.6 + Math.random() * 0.6;
-            fx.spawn({
-              x: e.fromX + dx * 0.2, y: 1.1, z: e.fromZ + dz * 0.2,
-              vx: dx * sp * 1.6 + (Math.random() - 0.5) * 1.2, vy: Math.random() * 0.4, vz: dz * sp * 1.6 + (Math.random() - 0.5) * 1.2,
-              life: 0.6, size: 0.16, sizeEnd: 0.45, color: k % 2 ? 0xf97316 : 0xfb923c, drag: 2,
-            });
-          }
-          break;
-        }
-        case 'flash':
-          fx.ballistic(e.fromX, 1.3, e.fromZ, e.toX, 0.3, e.toZ, 14, 0x374151, 0.12); // granada
-          fx.burst(e.toX, 1, e.toZ, 18, 0xffffff, 6, 0.22, 0.25); // destello
-          fx.burst(e.toX, 0.8, e.toZ, 8, 0xfde68a, 3, 0.16, 0.4);
-          break;
-        case 'leaderDown':
-          fx.burst(e.x, 1.6, e.z, 10, 0xfacc15, 2, 0.14, 0.6); // cae el megáfono
-          break;
-        case 'jam':
           break;
         case 'beating':
           // Cada golpe: chispa blanca del impacto, gotitas rojas y polvo del suelo.
@@ -369,8 +358,9 @@ export class RiotView {
     const chanting = this.sim.chanting;
     let bloodCount = 0;
     let markCount = 0;
+    const carried = new Set(this.sim.units.filter((u) => u.carryId !== null).map((u) => u.carryId));
     for (const p of this.sim.protesters) {
-      if (p.state === 'gone') continue;
+      if (p.state === 'gone' || carried.has(p.id)) continue; // los detenidos en moto van en el modelo de la moto
       const down = p.state === 'dead' || p.state === 'injured';
       const speed = Math.hypot(p.vx, p.vz);
       if (p.state === 'occupying') this.headings[p.id] = Math.PI;
@@ -407,7 +397,6 @@ export class RiotView {
       if (!down && p.state !== 'fleeing') {
         const fxKind = p.kind === 'lider' ? 'leader' : p.kind === 'prensa' ? 'flash' : p.kind === 'medico' ? 'medic' : null;
         if (fxKind) this.waves.emit(PROTESTER_FX_ID + p.id, fxKind, x, z, heading, this.frameSimDt);
-        if (p.stunned > 0) this.waves.emit(PROTESTER_FX_ID * 2 + p.id, 'stun', x, z, heading, this.frameSimDt); // aturdido
       }
       const model = this.modelFor(p);
       const mesh = this.crowd[model];
@@ -444,6 +433,8 @@ export class RiotView {
   private renderUnits(alpha: number, selected: ReadonlySet<number>): void {
     this.seen.clear();
     let ring = 0;
+    let aims = 0;
+    const lethal = this.sim.forceLevel >= FORCE_GATES.lethal;
     const gear = gearFrom(this.sim.upgrades, this.sim.forceLevel >= FORCE_GATES.lethal);
     // Cuerpos de agentes caídos.
     while (this.unitBodies.length < this.sim.bodies.length) {
@@ -469,6 +460,11 @@ export class RiotView {
         const geometry = getUnitModel(u.type, gear);
         if (mesh.geometry !== geometry) mesh.geometry = geometry;
       }
+      // Motorizados: con un detenido montado, cambia el modelo (va sentado entre los dos agentes).
+      if (u.type === 'moto') {
+        const geometry = getModel(u.carryId !== null ? 'motoCarry' : 'moto');
+        if (mesh.geometry !== geometry) mesh.geometry = geometry;
+      }
       const x = u.px + (u.x - u.px) * alpha;
       const z = u.pz + (u.z - u.pz) * alpha;
       const flying = UNITS[u.type].flying === true;
@@ -485,6 +481,15 @@ export class RiotView {
         z + Math.cos(u.heading) * lunge,
       );
       mesh.rotation.y = u.heading;
+      if (u.type === 'colectivo') mesh.material = u.hidden ? this.hiddenMaterial : VOXEL_MATERIAL;
+      // Francotirador apuntando: láser hasta su objetivo (más intenso a medida que va a disparar).
+      if (u.type === 'sniper' && lethal && u.aimId !== null && aims < 16) {
+        const t = this.sim.protesters[u.aimId];
+        if (t) {
+          this.aimPositions.set([x, ROOF_Y + 0.35, z, t.x, 1.1, t.z], aims * 6);
+          aims++;
+        }
+      }
       mesh.rotation.x = beating ? strike * 0.35 : 0; // se inclina sobre el que está en el suelo
 
       if (u.talking) this.waves.emit(u.id, 'megaphone', x, z, u.heading, this.frameSimDt);
@@ -500,6 +505,9 @@ export class RiotView {
       }
     }
     for (let i = ring; i < this.selectionRings.length; i++) this.selectionRings[i].visible = false;
+    this.aimGeometry.setDrawRange(0, aims * 2);
+    (this.aimGeometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    this.aimMaterial.opacity = 0.45 + Math.abs(Math.sin(this.time * 6)) * 0.4; // parpadeo
     for (const [id, mesh] of this.unitMeshes) {
       if (this.seen.has(id)) continue;
       this.scene.remove(mesh);
@@ -607,6 +615,9 @@ export class RiotView {
     this.env.dispose();
     this.particles.dispose();
     this.gasFx.dispose();
+    this.aimGeometry.dispose();
+    this.aimMaterial.dispose();
+    this.hiddenMaterial.dispose();
     this.crowd.forEach((m) => m.dispose());
     this.ringGeometry.dispose();
     this.ringMaterial.dispose();

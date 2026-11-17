@@ -5,7 +5,6 @@ import { EVENTS, type EventOption, type GameEventDef } from '../data/events';
 import { RIOTS, RIOT_LIST, type RiotDef, type RiotId } from '../data/riots';
 import { UNITS, UNIT_ORDER, type UnitType } from '../data/units';
 import { UPGRADES, type UpgradeId } from '../data/upgrades';
-import { GADGETS, GADGET_ORDER, type GadgetId } from '../data/gadgets';
 import type { RiotResult } from './riot/types';
 
 export type PayLevel = 0 | 1 | 2;
@@ -30,8 +29,6 @@ export interface PlayerNames {
 }
 
 export interface RegimeState extends PlayerNames {
-  /** Cargas extra compradas de cada gadget (además del uso gratis por protesta). */
-  gadgetCharges: Record<GadgetId, number>;
   day: number;
   maxDays: number;
   treasury: number;
@@ -97,13 +94,11 @@ export function createRegime(rng: Random, names: PlayerNames = DEFAULT_NAMES): R
       gastruck: 0,
       tanqueta: 0,
       supply: 0,
-      k9: 0,
       sniper: 0,
       colectivo: 0,
       army: 0,
     },
     upgrades: [],
-    gadgetCharges: Object.fromEntries(GADGET_ORDER.map((g) => [g, 0])) as Record<GadgetId, number>,
     emergency: false,
     diplomacyUsed: [],
     prisoners: 0,
@@ -194,28 +189,6 @@ export function buyUpgrade(state: RegimeState, id: UpgradeId): boolean {
   state.treasury -= price;
   state.upgrades.push(id);
   return true;
-}
-
-/** Compra una carga extra de un gadget ya desbloqueado. */
-export function buyGadgetCharge(state: RegimeState, id: GadgetId): boolean {
-  const price = GADGETS[id].chargePrice;
-  if (!state.upgrades.includes(id) || state.treasury < price) return false;
-  state.treasury -= price;
-  state.gadgetCharges[id]++;
-  return true;
-}
-
-/** Usos de cada gadget para la próxima protesta: 1 gratis + las cargas compradas (si está desbloqueado). */
-export function gadgetUsesFor(state: RegimeState): Record<GadgetId, number> {
-  return Object.fromEntries(
-    GADGET_ORDER.map((g) => [g, state.upgrades.includes(g) ? 1 + state.gadgetCharges[g] : 0]),
-  ) as Record<GadgetId, number>;
-}
-
-/** Tras una protesta: el primer uso era gratis; los demás gastan cargas compradas. */
-export function consumeGadgetCharges(state: RegimeState, used: Partial<Record<GadgetId, number>> | undefined): void {
-  if (!used) return;
-  for (const g of GADGET_ORDER) state.gadgetCharges[g] = Math.max(0, state.gadgetCharges[g] - Math.max(0, (used[g] ?? 0) - 1));
 }
 
 /** Evento del despacho para el nuevo día (o null si hoy no pasa nada). */

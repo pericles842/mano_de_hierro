@@ -31,7 +31,7 @@ export const MODEL_MOLOTOV = 6;
 export const MODEL_ESCUDERO = 7;
 export const MODEL_PRENSA = 8;
 export const MODEL_MEDICO = 9;
-export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker';
+export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker' | 'motoCarry';
 
 /** Material compartido por todos los modelos voxel (el color va en los vértices). */
 export const VOXEL_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -123,7 +123,9 @@ function buildModel(key: ModelKey): THREE.BufferGeometry {
     case 'shotgun':
       return shotgunModel();
     case 'moto':
-      return motoModel();
+      return motoModel(false);
+    case 'motoCarry':
+      return motoModel(true);
     case 'capture':
       return captureModel();
     case 'negotiator':
@@ -140,8 +142,6 @@ function buildModel(key: ModelKey): THREE.BufferGeometry {
       return shieldWallModel();
     case 'barricade':
       return barricadeModel();
-    case 'k9':
-      return k9Model();
     case 'sniper':
       return sniperModel();
     case 'colectivo':
@@ -410,18 +410,38 @@ function armyModel(): THREE.BufferGeometry {
   return b.build({ size: PERSON_SIZE, center: true });
 }
 
-function motoModel(): THREE.BufferGeometry {
+/**
+ * Moto policial con dos agentes (piloto delante, otro detrás). Con `carry`,
+ * el detenido va sentado en medio, con las manos atrás.
+ */
+function motoModel(carry: boolean): THREE.BufferGeometry {
   const b = new VoxelBuilder();
-  b.box(1, 0, 0, 2, 2, 1, 0x111111).box(1, 0, 8, 2, 2, 9, 0x111111); // ruedas
-  b.box(1, 2, 1, 2, 3, 8, 0x1e3a5f); // chasis
-  b.box(0, 3, 6, 3, 4, 8, 0xe5e7eb); // carenado
-  b.set(1, 4, 9, 0xfde047).set(2, 4, 9, 0xfde047);
-  b.box(1, 5, 7, 2, 5, 7, 0x3b82f6); // sirena
-  // Piloto
-  b.box(1, 4, 3, 2, 6, 4, 0x1e3a5f);
-  b.box(0, 5, 4, 3, 6, 5, 0x1e3a5f);
-  b.box(1, 7, 3, 2, 8, 4, 0x0f172a); // casco
-  b.box(0, 3, 3, 0, 4, 4, 0x172a45).box(3, 3, 3, 3, 4, 4, 0x172a45);
+  // Colores claros de policía: que se distingan bien desde la cámara cenital.
+  const UNIFORM = 0x3b6fb6;
+  const LEGS = 0x2a4f86;
+  const HELMET = 0xf1f5f9;
+  const VISOR = 0x93c5fd;
+  b.box(1, 0, 0, 2, 2, 1, 0x1f2937).box(1, 0, 9, 2, 2, 10, 0x1f2937); // ruedas
+  b.box(1, 2, 1, 2, 3, 9, 0xf8fafc); // chasis blanco
+  b.box(1, 3, 1, 2, 3, 9, 0x2563eb); // franja azul
+  b.box(0, 3, 7, 3, 4, 9, 0xf8fafc); // carenado
+  b.set(1, 4, 10, 0xfde047).set(2, 4, 10, 0xfde047); // faro
+  b.set(1, 5, 8, 0x3b82f6).set(2, 5, 8, 0xef4444); // sirena azul y roja
+  const rider = (z: number): void => {
+    b.box(1, 4, z, 2, 6, z + 1, UNIFORM); // torso
+    b.box(0, 5, z + 1, 3, 5, z + 1, UNIFORM); // brazos
+    b.box(0, 3, z, 0, 4, z + 1, LEGS).box(3, 3, z, 3, 4, z + 1, LEGS); // piernas
+    b.box(1, 7, z, 2, 8, z + 1, HELMET); // casco blanco
+    b.box(1, 7, z + 1, 2, 7, z + 1, VISOR); // visera
+  };
+  rider(5); // piloto
+  rider(1); // agente de atrás
+  if (carry) {
+    // Detenido en medio: ropa civil naranja, cabeza descubierta, encogido.
+    b.box(1, 4, 3, 2, 5, 4, 0xf59e0b);
+    b.box(1, 6, 3, 2, 7, 4, 0xc68642);
+    b.box(1, 7, 3, 2, 7, 3, 0x111111); // pelo
+  }
   return b.build({ size: 0.22, center: true });
 }
 
@@ -569,24 +589,6 @@ function markerModel(): THREE.BufferGeometry {
   return b.build({ size: 0.4, center: true, jitter: 0 });
 }
 
-/** Agente con perro policía (pastor alemán) atado con correa. */
-function k9Model(): THREE.BufferGeometry {
-  const b = new VoxelBuilder();
-  soldierBody(b, 0);
-  b.box(4, 3, 1, 6, 3, 1, 0x111111); // correa
-  // Perro: cuerpo, patas, cabeza y orejas.
-  const FUR = 0x8b5a2b;
-  const DARK = 0x2d1b0e;
-  b.box(6, 2, 0, 7, 3, 4, FUR);
-  b.box(6, 3, 1, 7, 3, 3, DARK); // lomo oscuro
-  for (const z of [0, 4]) b.box(6, 0, z, 6, 1, z, DARK).box(7, 0, z, 7, 1, z, DARK);
-  b.box(6, 3, 5, 7, 4, 6, FUR); // cabeza
-  b.set(6, 3, 7, DARK).set(7, 3, 7, DARK); // hocico
-  b.set(6, 5, 5, DARK).set(7, 5, 5, DARK); // orejas
-  b.set(6, 3, -1, FUR); // cola
-  return b.build({ size: PERSON_SIZE, center: true });
-}
-
 /** Francotirador tumbado en la azotea, con fusil de precisión. */
 function sniperModel(): THREE.BufferGeometry {
   const b = new VoxelBuilder();
@@ -600,19 +602,12 @@ function sniperModel(): THREE.BufferGeometry {
   return b.build({ size: PERSON_SIZE, center: true });
 }
 
-/** Colectivo: civil con casco abierto y bate en una moto sin distintivos. */
+/** Colectivo a pie: civil con gorra, pañuelo y camiseta del partido, pistola en la mano. */
 function colectivoModel(): THREE.BufferGeometry {
   const b = new VoxelBuilder();
-  b.box(1, 0, 0, 2, 2, 1, 0x111111).box(1, 0, 8, 2, 2, 9, 0x111111); // ruedas
-  b.box(1, 2, 1, 2, 3, 8, 0x7f1d1d); // chasis rojo
-  b.box(0, 3, 6, 3, 4, 8, 0x27272a);
-  b.set(1, 4, 9, 0xfde047);
-  // Piloto: camiseta roja del partido, pañuelo y casco abierto.
-  b.box(1, 4, 3, 2, 6, 4, 0xb91c1c);
-  b.box(0, 5, 4, 3, 6, 5, 0xb91c1c);
-  b.box(1, 7, 3, 2, 7, 4, 0x111111); // pañuelo
-  b.box(1, 8, 3, 2, 9, 4, 0xe0ac69);
-  b.box(1, 10, 3, 2, 10, 4, 0x3f3f46); // casco
-  b.box(4, 5, 3, 4, 9, 3, 0x92400e); // bate en alto
-  return b.build({ size: 0.22, center: true });
+  person(b, 0, 0, { shirt: 0xb91c1c, pants: 0x27272a, skin: 0xc68642, hair: 0x111111 });
+  b.box(1, 6, 0, 2, 6, 1, 0x111111); // pañuelo tapando la cara
+  b.box(0, 9, 0, 3, 9, 1, 0x1f2937).box(1, 9, 2, 2, 9, 2, 0x1f2937); // gorra con visera
+  b.box(4, 4, 1, 4, 4, 3, 0x111111); // pistola apuntando
+  return b.build({ size: PERSON_SIZE, center: true });
 }

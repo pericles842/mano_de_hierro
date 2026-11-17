@@ -1,7 +1,6 @@
 import type { CrowdStage } from '../../data/crowdStages';
 import type { SpawnId } from '../../data/riots';
 import type { UnitType } from '../../data/units';
-import type { GadgetId } from '../../data/gadgets';
 
 export type ProtesterKind = 'pacifico' | 'radical' | 'lider' | 'escudero' | 'prensa' | 'medico';
 /** 'injured': en el suelo un rato (los médicos pueden levantarlo). 'dead': cuerpo caído, se queda en la plaza. */
@@ -41,8 +40,6 @@ export interface Protester {
   marked: number;
   /** Perseguido por motorizados: los médicos no pueden recuperarlo. */
   chased: boolean;
-  /** Segundos que queda paralizado por una granada aturdidora. */
-  stunned: number;
 }
 
 export interface Unit {
@@ -93,6 +90,11 @@ export interface Unit {
   carryId: number | null;
   /** Helicóptero: segundos que obedece la orden del jugador antes de volver a patrullar. */
   holdTimer: number;
+  /** Francotirador: objetivo que vigila y segundos que le faltan para disparar (con mano dura). */
+  aimId: number | null;
+  aimTimer: number;
+  /** Colectivo escondido (en una esquina o entre la multitud): ni piedras ni prensa lo señalan. */
+  hidden: boolean;
   /** Paliza en curso: a quién tiene agarrado y cuánto le queda. */
   beatId: number | null;
   beatTimer: number;
@@ -156,10 +158,6 @@ export type RiotEvent =
   | { type: 'marchStart' }
   | { type: 'planningEnd' }
   | { type: 'beating'; x: number; z: number }
-  | { type: 'bite'; x: number; z: number }
-  | { type: 'pepper'; fromX: number; fromZ: number; toX: number; toZ: number }
-  | { type: 'flash'; fromX: number; fromZ: number; toX: number; toZ: number }
-  | { type: 'jam' }
   | { type: 'leaderDown'; x: number; z: number; how: 'arrest' | 'killed'; left: number };
 
 export interface RiotResult {
@@ -193,6 +191,4 @@ export interface RiotResult {
   soldiersKilled: number;
   /** Segundos-tanqueta en la plaza (cuestan presión internacional). */
   tanquetaSeconds: number;
-  /** Usos de cada gadget en esta protesta (para descontar las cargas pagadas). */
-  gadgetsUsed?: Partial<Record<GadgetId, number>>;
 }

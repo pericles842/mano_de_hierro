@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Random } from '../src/core/Random';
 import { RIOTS } from '../src/data/riots';
 import type { UnitType } from '../src/data/units';
-import { buyGadgetCharge, consumeGadgetCharges, createRegime, gadgetUsesFor } from '../src/sim/regime';
 import { PREP_TIME, RiotSim, type RiotConfig } from '../src/sim/riot/RiotSim';
 import { makeStock } from './helpers';
 
@@ -10,7 +8,7 @@ function sim(over: Partial<RiotConfig> = {}, stock: Partial<Record<UnitType, num
   return new RiotSim({
     def: RIOTS.chalecos,
     scale: 1,
-    stock: makeStock({ soldier: 10, shield: 2, k9: 3, sniper: 5, colectivo: 3, ...stock }),
+    stock: makeStock({ soldier: 10, shield: 2, sniper: 5, colectivo: 4, capture: 2, ...stock }),
     loyalty: 80,
     unrest: 30,
     seed: 3,
@@ -36,98 +34,92 @@ describe('francotiradores', () => {
     expect(s.available.sniper).toBe(3); // cuestan una tropa cada uno
   });
 
-  it('solo disparan con mano dura', () => {
-    const calm = sim({ unrest: 70 });
-    calm.deploy('sniper', -6, -24);
-    calm.setForce(2);
-    run(calm, PREP_TIME + 40);
-    expect(calm.deaths).toBe(0);
+  it('sin mano dura solo vigila: marca objetivos de alto valor pero no dispara', () => {
+    const s = sim({ unrest: 70 });
+    s.deploy('sniper', -6, -24);
+    s.setForce(2);
+    let marked = false;
+    run(s, PREP_TIME + 40, () => (marked ||= s.protesters.some((p) => p.marked > 0)));
+    expect(marked).toBe(true);
+    expect(s.deaths).toBe(0);
+  });
 
-    const hard = sim({ unrest: 70 });
-    hard.deploy('sniper', -6, -24);
-    hard.deploy('sniper', 6, -24);
-    hard.setForce(3);
-    run(hard, PREP_TIME + 40);
-    expect(hard.deaths).toBeGreaterThan(0);
+  it('con mano dura asesina a su objetivo, pero tarda en apuntar', () => {
+    const s = sim({ unrest: 70 });
+    s.deploy('sniper', -6, -24);
+    s.setForce(3);
+    let firstShot = -1;
+    let aimingSince = -1;
+    run(s, PREP_TIME + 60, () => {
+      const u = s.units[0];
+      if (aimingSince < 0 && u.aimId !== null) aimingSince = s.elapsed;
+      if (firstShot < 0 && s.events.some((e) => e.type === 'liveShot')) firstShot = s.elapsed;
+    });
+    expect(firstShot).toBeGreaterThan(0);
+    expect(firstShot - aimingSince).toBeGreaterThanOrEqual(6.5); // ~7 s apuntando
+  });
+
+  it('cada disparo aterroriza a la plaza', () => {
+    const s = sim({ unrest: 70 });
+    s.deploy('sniper', -6, -24);
+    s.setForce(3);
+    let before = 0;
+    let after = 0;
+    run(s, PREP_TIME + 60, () => {
+      if (after > 0) return;
+      const calm = s.protesters.filter((p) => p.kind === 'pacifico' && p.state === 'advancing');
+      const avg = calm.reduce((a, p) => a + p.resolve / p.maxResolve, 0) / Math.max(1, calm.length);
+      if (s.events.some((e) => e.type === 'liveShot')) after = avg;
+      else before = avg;
+    });
+    expect(after).toBeGreaterThan(0);
+    expect(after).toBeLessThan(before);
+  });
+
+  it('las capturas van a por los objetivos que marca el francotirador', () => {
+    const s = sim({ unrest: 40 });
+    s.deploy('sniper', -6, -24);
+    s.deploy('sniper', 6, -24);
+    s.deploy('capture', 0, 14);
+    run(s, PREP_TIME + 60);
+    expect(s.arrests).toBeGreaterThan(0);
+  });
+});
+
+describe('motorizados', () => {
+  it('montan al detenido en la moto, se lo llevan a la puerta del palacio y allí desaparece', () => {
+    const s = sim({ unrest: 20 }, { moto: 2 });
+    s.deploy('moto', -4, 14);
+    s.deploy('moto', 4, 14);
+    let carriedSeen = false;
+    let arrestZ: number | null = null;
+    run(s, PREP_TIME + 70, () => {
+      if (s.units.some((u) => u.carryId !== null)) carriedSeen = true;
+      const a = s.events.find((e) => e.type === 'arrest');
+      if (a && arrestZ === null && a.type === 'arrest') arrestZ = a.z;
+    });
+    expect(carriedSeen).toBe(true);
+    expect(arrestZ).not.toBeNull();
+    expect(arrestZ!).toBeLessThan(-17); // en la puerta del palacio
   });
 });
 
 describe('colectivos paramilitares', () => {
-  it('atacan por su cuenta incluso en contención y apalean gente', () => {
+  it('a pie y por su cuenta: disparan a la multitud incluso en contención', () => {
     const s = sim({ unrest: 20 });
     s.deploy('colectivo', -4, 14);
     s.deploy('colectivo', 4, 14);
     s.setForce(0);
-    let beatings = 0;
-    run(s, PREP_TIME + 50, () => (beatings += s.events.filter((e) => e.type === 'beating').length));
-    expect(beatings).toBeGreaterThan(0);
-  });
-});
-
-describe('brigada canina', () => {
-  it('en contención no muerde; desde contención agresiva, sí', () => {
-    const calm = sim({ unrest: 20 });
-    for (const x of [-4, 0, 4]) calm.deploy('k9', x, 14);
-    calm.setForce(0);
-    let bites = 0;
-    run(calm, PREP_TIME + 40, () => (bites += calm.events.filter((e) => e.type === 'bite').length));
-    expect(bites).toBe(0);
-
-    const hard = sim({ unrest: 20 });
-    for (const x of [-4, 0, 4]) hard.deploy('k9', x, 14);
-    hard.setForce(1);
-    bites = 0;
-    run(hard, PREP_TIME + 50, () => (bites += hard.events.filter((e) => e.type === 'bite').length));
-    expect(bites).toBeGreaterThan(0);
-  });
-});
-
-describe('gadgets', () => {
-  it('flash: lo lanza solo una parte de los agentes y paraliza al grupo', () => {
-    const s = sim({ gadgets: { flash: 1 }, unrest: 20 });
-    for (let x = -9; x <= 9; x += 2) s.deploy('soldier', x, 16);
-    run(s, PREP_TIME + 25);
-    let flashes = 0;
-    expect(s.useGadget('flash')).toBe(true);
-    flashes = s.events.filter((e) => e.type === 'flash').length;
-    s.step(1 / 30);
-    flashes += s.events.filter((e) => e.type === 'flash').length;
-    expect(flashes).toBeGreaterThan(0);
-    expect(flashes).toBeLessThan(10); // no todos los agentes
-    expect(s.protesters.some((p) => p.stunned > 0)).toBe(true);
-    expect(s.gadgetUses.flash).toBe(0);
-    expect(s.useGadget('flash')).toBe(false); // un solo uso
+    let shots = 0;
+    run(s, PREP_TIME + 50, () => (shots += s.events.filter((e) => e.type === 'liveShot').length));
+    expect(shots).toBeGreaterThan(0);
   });
 
-  it('no se puede usar en la preparación ni sin usos', () => {
-    const s = sim({ planning: 60, gadgets: { pimienta: 1 } });
-    s.deploy('soldier', 0, 10);
-    expect(s.useGadget('pimienta')).toBe(false);
-    const none = sim();
-    expect(none.useGadget('inhibidor')).toBe(false);
-  });
-
-  it('inhibidor: llega menos gente', () => {
-    const s = sim({ gadgets: { inhibidor: 1 } });
-    run(s, PREP_TIME + 2);
-    const before = s.total;
-    expect(s.useGadget('inhibidor')).toBe(true);
-    expect(s.total).toBeLessThan(before);
-    expect(s.jamTimer).toBeGreaterThan(0);
-  });
-
-  it('cargas: 1 uso gratis por protesta más las compradas; se gastan solo las pagadas', () => {
-    const r = createRegime(new Random(2));
-    r.treasury = 5000;
-    expect(gadgetUsesFor(r).flash).toBe(0); // sin desbloquear
-    r.upgrades.push('flash');
-    expect(gadgetUsesFor(r).flash).toBe(1);
-    expect(buyGadgetCharge(r, 'flash')).toBe(true);
-    expect(gadgetUsesFor(r).flash).toBe(2);
-    consumeGadgetCharges(r, { flash: 1 }); // solo el gratis
-    expect(r.gadgetCharges.flash).toBe(1);
-    consumeGadgetCharges(r, { flash: 2 });
-    expect(r.gadgetCharges.flash).toBe(0);
+  it('se esconden en las esquinas: ahí ni las piedras los alcanzan', () => {
+    const s = sim({ unrest: 85, def: RIOTS.puerto });
+    const c = s.deploy('colectivo', 26, -18)!; // esquina de la plaza
+    run(s, PREP_TIME + 3);
+    expect(c.hidden).toBe(true);
   });
 });
 
@@ -138,34 +130,17 @@ describe('líderes', () => {
     expect(counts.size).toBeGreaterThan(1);
   });
 
-  it('arrestar a un líder desmoraliza a toda la plaza aunque esté en caos', () => {
-    const s = sim({ unrest: 90, def: { ...RIOTS.chalecos, leaders: 3 } });
-    s.deploy('capture', 0, 14);
-    s.anger = 0.95; // caos
-    let downs = 0;
-    let moraleDrop = false;
-    run(s, PREP_TIME + 80, () => {
-      for (const e of s.events) {
-        if (e.type !== 'leaderDown') continue;
-        downs++;
-        moraleDrop = true;
-      }
-    });
-    expect(s.stage).toBeGreaterThanOrEqual(2);
-    if (downs > 0) expect(moraleDrop).toBe(true);
-  });
-
   it('abatir a un líder baja el ánimo de todos (no solo enfurece)', () => {
-    const s = sim({ unrest: 70, def: { ...RIOTS.chalecos, leaders: 3 } });
+    // Protesta sin armados: los armados tienen prioridad sobre los líderes.
+    const s = sim({ unrest: 10, def: { ...RIOTS.cacerolazo, leaders: 3 } });
     s.deploy('sniper', -6, -24);
     s.deploy('sniper', 6, -24);
     s.setForce(3);
-    let checked = false;
-    run(s, PREP_TIME + 60, () => {
-      if (checked) return;
-      if (s.events.some((e) => e.type === 'leaderDown' && e.how === 'killed')) checked = true;
+    let killedLeader = false;
+    run(s, PREP_TIME + 90, () => {
+      if (s.events.some((e) => e.type === 'leaderDown' && e.how === 'killed')) killedLeader = true;
     });
-    expect(checked).toBe(true);
+    expect(killedLeader).toBe(true);
     expect(s.leadersDown).toBeGreaterThan(0);
   });
 });

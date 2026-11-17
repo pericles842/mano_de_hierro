@@ -3,7 +3,6 @@ import { CROWD_STAGES, STAGE_HYSTERESIS, stageForAnger, type CrowdStage } from '
 import { FORCE_GATES, FORCE_LEVELS } from '../../data/forceLevels';
 import type { RiotDef, SpawnId } from '../../data/riots';
 import { UNITS, isRooftop, isVehicle, type UnitDef, type UnitType } from '../../data/units';
-import { GADGET_ORDER, GADGET_SHARE, type GadgetId } from '../../data/gadgets';
 import { upgradeEffects, type UpgradeEffects, type UpgradeId } from '../../data/upgrades';
 import { SpatialGrid } from '../spatialGrid';
 import {
@@ -44,8 +43,6 @@ export interface RiotConfig {
   upgrades?: readonly UpgradeId[];
   /** Segundos de preparación antes de empezar (0 = empieza directamente). */
   planning?: number;
-  /** Usos disponibles de cada gadget en esta protesta. */
-  gadgets?: Partial<Record<GadgetId, number>>;
 }
 
 /** Segundos de concentración antes de que arranque la marcha. */
@@ -65,6 +62,10 @@ const PRESS_RADIUS = 8;
 const TANQUETA_MAGNET = 12;
 /** Distancia máxima a la que la infantería sale de su posición a enfrentar a la multitud, por nivel de fuerza. */
 const ENGAGE_LEASH = [0, 6, 10, 16];
+/** Francotirador: segundos que tarda en apuntar antes de disparar (con mano dura). */
+const SNIPER_AIM = 7;
+/** Motorizados: los detenidos se entregan en la puerta del palacio. */
+const MOTO_JAIL_Z = -19;
 /** Paliza: duración total y segundos entre golpes. */
 const BEAT_TIME = 1.8;
 const BEAT_STRIKE = 0.45;
@@ -154,11 +155,6 @@ export class RiotSim {
   readonly leaderTotal: number;
   /** Líderes arrestados o abatidos. */
   leadersDown = 0;
-  /** Gadgets: usos que quedan y usos gastados. */
-  readonly gadgetUses: Record<GadgetId, number>;
-  readonly gadgetUsed: Record<GadgetId, number>;
-  /** Comunicaciones cortadas (camión inhibidor): la prensa no transmite. */
-  jamTimer = 0;
   private nextUnitId = 1;
   private stepCount = 0;
   private sprayingNow = 0;
@@ -183,8 +179,6 @@ export class RiotSim {
     this.fx = upgradeEffects(this.upgrades);
     this.surgeAt = PREP_TIME + this.rng.range(10, 50) * (1.15 - this.anger);
     this.leaderTotal = Math.max(1, cfg.def.leaders + this.rng.int(-1, 2));
-    this.gadgetUses = Object.fromEntries(GADGET_ORDER.map((g) => [g, cfg.gadgets?.[g] ?? 0])) as Record<GadgetId, number>;
-    this.gadgetUsed = Object.fromEntries(GADGET_ORDER.map((g) => [g, 0])) as Record<GadgetId, number>;
     this.nextWaveSpawn = this.rng.pick(this.def.spawns);
     const windAngle = this.rng.range(0, Math.PI * 2);
     this.wind = { x: Math.cos(windAngle) * 0.45, z: Math.sin(windAngle) * 0.45 };
@@ -238,36 +232,6 @@ export class RiotSim {
   get leadersLeft(): number {
     const standing = this.protesters.filter((p) => p.kind === 'lider' && (p.state === 'advancing' || p.state === 'occupying' || p.state === 'gathering')).length;
     return standing + (this.leaderTotal - this.leadersSpawned);
-  }
-
-  /**
-   * Gadget de un solo uso. Pimienta y flash los usa solo un porcentaje de los agentes.
-   * No se gasta si nadie puede usarlo.
-   */
-  useGadget(id: GadgetId): boolean {
-    if (this.planning || this.result || this.gadgetUses[id] <= 0) return false;
-    let acted = 0;
-    if (id === 'inhibidor') {
-      this.total -= Math.floor((this.total - this.spawned) * 0.3);
-      this.jamTimer = 30;
-      this.anger = Math.min(1, this.anger + 0.04);
-      this.events.push({ type: 'jam' });
-      acted = 1;
-    } else {
-      const agents = this.units.filter(
-        (u) => this.active(u) && (u.type === 'soldier' || u.type === 'shield' || (id === 'pimienta' && u.type === 'k9')),
-      );
-      const n = agents.length > 0 ? Math.max(1, Math.round(agents.length * GADGET_SHARE)) : 0;
-      for (let i = agents.length - 1; i > 0; i--) {
-        const j = this.rng.int(0, i);
-        [agents[i], agents[j]] = [agents[j], agents[i]];
-      }
-      for (const u of agents.slice(0, n)) if (id === 'pimienta' ? this.pepper(u) : this.flashbang(u)) acted++;
-    }
-    if (acted === 0) return false;
-    this.gadgetUses[id]--;
-    this.gadgetUsed[id]++;
-    return true;
   }
 
   /** Vehículo: aparece en la puerta del palacio y se dirige al centro de la plaza. Solo durante la protesta. */
@@ -381,6 +345,9 @@ export class RiotSim {
       holdTimer: 0,
       beatId: null,
       beatTimer: 0,
+      aimId: null,
+      aimTimer: 0,
+      hidden: false,
     };
     this.available[type]--;
     if (type === 'tanqueta') this.tanquetasDeployed++;
@@ -452,7 +419,6 @@ export class RiotSim {
   /** MODO DEVELOPER (temporal): todas las tropas disponibles. */
   devUnlockAll(): void {
     for (const type of Object.keys(this.available) as UnitType[]) this.available[type] = 99;
-    for (const g of GADGET_ORDER) this.gadgetUses[g] = 9;
   }
 
   setForce(level: number): void {
@@ -477,7 +443,6 @@ export class RiotSim {
     }
     this.stepCount++;
     this.elapsed += dt;
-    this.jamTimer = Math.max(0, this.jamTimer - dt);
     this.forceIntegral += this.forceLevel * dt;
 
     this.updateAnger(dt);
@@ -649,7 +614,6 @@ export class RiotSim {
       downTimer: 0,
       marked: 0,
       chased: false,
-      stunned: 0,
     };
     this.arm(p, false);
     if (state === 'advancing') this.assignRallySpot(p);
@@ -712,11 +676,6 @@ export class RiotSim {
       if (!isUpright(p)) continue;
       p.px = p.x;
       p.pz = p.z;
-      if (p.stunned > 0) {
-        p.vx = 0;
-        p.vz = 0;
-        continue;
-      }
 
       let desX = 0;
       let desZ = 0;
@@ -1001,12 +960,8 @@ export class RiotSim {
       case 'negotiator':
         this.negotiate(u, def, dt);
         break;
-      case 'k9':
-        this.engage(u, def);
-        this.k9(u, def);
-        break;
       case 'sniper':
-        this.sniper(u);
+        this.sniper(u, dt);
         break;
       case 'colectivo':
         this.colectivo(u);
@@ -1085,40 +1040,55 @@ export class RiotSim {
     if (annoyed > 0) this.anger = Math.min(1, this.anger + pr.strength * 0.004 * Math.min(annoyed, 8) * mult * dt);
   }
 
-  /** Brigada canina: persigue a los que huyen y, desde contención agresiva, muerde al que tiene delante. */
-  private k9(u: Unit, def: UnitDef): void {
-    if (!this.active(u)) return;
-    this.grid.query(u.x, u.z, 6, this.near2);
-    for (const i of this.near2) {
-      const p = this.protesters[i];
-      if (p.state === 'fleeing' && Math.hypot(p.x - u.x, p.z - u.z) < 6) p.chased = true; // los médicos ya no los recuperan
+  /**
+   * Francotirador: vigila desde la azotea y marca al objetivo de más valor (armados > líderes >
+   * radicales) para que capturas y motos vayan a por él. Con mano dura lo asesina, pero tarda
+   * SNIPER_AIM s en apuntar. La gente no sabe que está ahí hasta que dispara: entonces cunde el terror.
+   */
+  private sniper(u: Unit, dt: number): void {
+    const range = UNITS.sniper.range ?? 45;
+    const current = u.aimId !== null ? this.protesters[u.aimId] : null;
+    const stillValid = current && isUpright(current) && current.state !== 'fleeing' && current.state !== 'gathering'
+      && Math.hypot(current.x - u.x, current.z - u.z) <= range;
+    if (!stillValid) {
+      u.aimId = this.highValueTarget(u, range);
+      u.aimTimer = SNIPER_AIM;
+      if (u.aimId === null) return;
     }
-    if (this.forceLevel < FORCE_GATES.gas || u.cooldown > 0) return;
-    const reach = def.pushRadius + def.radius;
-    const p = this.protesterAt(u.x, u.z, reach, (q) => q.kind !== 'prensa' && q.state !== 'gathering');
-    if (!p) return;
-    u.cooldown = def.cooldown ?? 3;
-    this.injure(p, 2.5);
-    p.chased = true;
-    this.anger = Math.min(1, this.anger + 0.005);
-    this.harshness += 0.3;
-    this.events.push({ type: 'bite', x: p.x, z: p.z });
-    this.notePressIfNear(p.x, p.z);
+    const p = this.protesters[u.aimId!];
+    p.marked = Math.max(p.marked, 1.5); // marcado mientras lo vigila
+    u.heading = Math.atan2(p.x - u.x, p.z - u.z);
+    if (this.forceLevel < FORCE_GATES.lethal) {
+      u.aimTimer = SNIPER_AIM; // sin mano dura solo vigila
+      return;
+    }
+    u.aimTimer -= dt;
+    if (u.aimTimer > 0) return;
+
+    if (!this.openedFire.police) {
+      this.openedFire.police = true;
+      this.events.push({ type: 'openFire', by: 'police' });
+    }
+    this.harshness += 0.5;
+    const hit = this.rng.chance(0.85);
+    if (hit) this.kill(p);
+    this.events.push({ type: 'liveShot', fromX: u.x, fromZ: u.z, toX: p.x, toZ: p.z, result: hit ? 'kill' : 'miss' });
+    this.notePressIfNear(p.x, p.z, hit ? 2 : 1);
+    this.terror(p.x, p.z, 14, 0.35);
+    u.aimId = null;
+    u.aimTimer = SNIPER_AIM;
   }
 
-  /**
-   * Francotirador en la azotea: solo con mano dura. Prioridad: armados (fuego, bombas) > líderes > radicales.
-   * Cada líder abatido desmoraliza a toda la plaza.
-   */
-  private sniper(u: Unit): void {
-    if (this.forceLevel < FORCE_GATES.lethal || u.fireCd > 0) return;
+  /** Objetivo de más valor al alcance que no esté vigilando ya otro francotirador. */
+  private highValueTarget(u: Unit, range: number): number | null {
+    const taken = new Set(this.units.filter((o) => o !== u && o.aimId !== null).map((o) => o.aimId));
     let best: Protester | null = null;
     let bestScore = Infinity;
     for (const p of this.protesters) {
-      if (!isUpright(p) || p.state === 'fleeing' || p.state === 'gathering' || p.kind === 'prensa') continue;
+      if (!isUpright(p) || p.state === 'fleeing' || p.state === 'gathering' || p.kind === 'prensa' || taken.has(p.id)) continue;
       const d = Math.hypot(p.x - u.x, p.z - u.z);
-      if (d > (UNITS.sniper.range ?? 45)) continue;
-      const priority = p.weapon === 'arma' || p.weapon === 'molotov' ? 0 : p.kind === 'lider' ? 1 : p.kind === 'radical' ? 2 : -1;
+      if (d > range) continue;
+      const priority = p.weapon === 'arma' || p.weapon === 'molotov' ? 0 : p.kind === 'lider' ? 1 : p.kind === 'radical' || p.kind === 'escudero' ? 2 : -1;
       if (priority < 0) continue;
       const score = priority * 100 + d;
       if (score < bestScore) {
@@ -1126,104 +1096,68 @@ export class RiotSim {
         best = p;
       }
     }
-    if (!best) return;
-    u.fireCd = this.rng.range(2.5, 3.5);
-    u.heading = Math.atan2(best.x - u.x, best.z - u.z);
-    if (!this.openedFire.police) {
-      this.openedFire.police = true;
-      this.events.push({ type: 'openFire', by: 'police' });
-    }
-    this.harshness += 0.5;
-    const hit = this.rng.chance(0.85);
-    if (hit) this.kill(best);
-    this.events.push({ type: 'liveShot', fromX: u.x, fromZ: u.z, toX: best.x, toZ: best.z, result: hit ? 'kill' : 'miss' });
-    this.notePressIfNear(best.x, best.z, hit ? 2 : 1);
+    return best ? best.id : null;
   }
 
   /**
-   * Colectivo paramilitar: por su cuenta, a cualquier nivel de fuerza. Embiste al grupo más denso y
-   * apalea a hasta dos por pasada. Sin uniforme: la prensa lo cuenta la mitad. Con la plaza encendida,
-   * a veces se les va la mano (muertos).
+   * Terror tras un disparo: los tranquilos de alrededor pierden ánimo (cada uno distinto) y toda
+   * la plaza se encoge un poco; los radicales, en cambio, se enfurecen.
+   */
+  private terror(x: number, z: number, radius: number, strength: number): void {
+    let angry = 0;
+    for (const q of this.protesters) {
+      if (!isUpright(q) || q.state === 'fleeing') continue;
+      const near = Math.hypot(q.x - x, q.z - z) < radius;
+      if (q.kind === 'radical' || q.kind === 'escudero' || q.kind === 'lider') {
+        if (near) angry++;
+        continue;
+      }
+      const temper = 0.5 + ((q.id * 37) % 11) / 10;
+      q.resolve -= q.maxResolve * (near ? strength * temper : 0.04);
+    }
+    this.anger = Math.min(1, this.anger + 0.01 + Math.min(angry, 10) * 0.002);
+  }
+
+  /**
+   * Colectivo paramilitar, a pie y sin uniforme: busca esconderse entre la multitud (o se queda en
+   * su esquina) y desde ahí dispara con pistola a la gente cada pocos segundos, a cualquier nivel de
+   * fuerza. Cada disparo aterroriza; a veces hiere y, con la plaza encendida, mata.
    */
   private colectivo(u: Unit): void {
+    // ¿Escondido? Entre la multitud o pegado a los bordes de la plaza (esquinas, bocacalles).
+    const edge = Math.abs(u.x) >= 23 || u.z <= -16 || u.z >= 25;
+    u.hidden = edge || this.crowdAround(u.x, u.z, 3) >= 4;
     if (!this.active(u)) return;
-    if (u.chargeTo) {
-      u.targetX = u.chargeTo.x;
-      u.targetZ = u.chargeTo.z;
-      if (u.ammo > 0) {
-        // Radio amplio: la embestida empuja a la gente antes de que llegue el golpe.
-        const v = this.protesterAt(u.x, u.z, 2.4, (p) => p.kind !== 'prensa' && p.state !== 'gathering');
-        if (v) {
-          u.ammo--;
-          const tooFar = this.anger > 0.55 && this.rng.chance(0.15);
-          if (tooFar) this.kill(v);
-          else this.injure(v, 4);
-          this.anger = Math.min(1, this.anger + 0.008);
-          this.harshness += 0.2;
-          this.events.push({ type: 'beating', x: v.x, z: v.z });
-          this.notePressIfNear(v.x, v.z, 0.5);
-        }
-      }
-      if (Math.hypot(u.chargeTo.x - u.x, u.chargeTo.z - u.z) < 0.6) {
-        u.chargeTo = null;
+
+    // Se cuela en el grupo más cercano a su puesto (sin alejarse demasiado de él).
+    if (this.stepCount % 30 === u.id % 30) {
+      const spot = this.densestPoint(u.homeX, u.homeZ, 14, 0);
+      if (spot && spot.count >= 4) {
+        const dx = u.x - spot.x;
+        const dz = u.z - spot.z;
+        const d = Math.hypot(dx, dz) || 1;
+        u.targetX = clamp(spot.x + (dx / d) * 2.5, -29, 29);
+        u.targetZ = clamp(spot.z + (dz / d) * 2.5, -20, 29);
+      } else {
         u.targetX = u.homeX;
         u.targetZ = u.homeZ;
-        u.cooldown = this.rng.range(2.5, 4);
       }
-      return;
     }
-    if (u.cooldown > 0 || Math.hypot(u.x - u.homeX, u.z - u.homeZ) > 1) return;
-    const spot = this.densestPoint(u.homeX, u.homeZ, 18, 0);
-    if (!spot || spot.count < 3) return;
-    const dx = spot.x - u.x;
-    const dz = spot.z - u.z;
-    const d = Math.hypot(dx, dz) || 1;
-    u.ammo = 2; // víctimas por pasada
-    u.chargeTo = { x: clamp(spot.x + (dx / d) * 3, -32, 32), z: clamp(spot.z + (dz / d) * 3, -20, 34) };
-    this.events.push({ type: 'charge', x: spot.x, z: spot.z });
-  }
 
-  /** Gas pimienta: rocía en cono a quien tiene delante (corto alcance). */
-  private pepper(u: Unit): boolean {
-    const fx = Math.sin(u.heading);
-    const fz = Math.cos(u.heading);
-    let hits = 0;
-    this.grid.query(u.x, u.z, 3.5, this.near2);
-    for (const i of this.near2) {
-      const p = this.protesters[i];
-      if (!isUpright(p) || p.state === 'fleeing' || p.kind === 'prensa') continue;
-      const dx = p.x - u.x;
-      const dz = p.z - u.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 3.5 || (d > 0.8 && (dx * fx + dz * fz) / d < 0.2)) continue;
-      p.resolve -= 0.8 * p.maxResolve;
-      hits++;
-    }
-    const tx = u.x + fx * 2.5;
-    const tz = u.z + fz * 2.5;
-    this.events.push({ type: 'pepper', fromX: u.x, fromZ: u.z, toX: tx, toZ: tz });
-    this.anger = Math.min(1, this.anger + 0.003);
+    if (u.cooldown > 0) return;
+    const target = this.nearestProtester(u.x, u.z, UNITS.colectivo.range ?? 10, 0);
+    if (!target) return;
+    u.cooldown = this.rng.range(3, 5);
+    u.heading = Math.atan2(target.x - u.x, target.z - u.z);
+    const roll = this.rng.next();
+    const killChance = 0.06 + (this.anger > 0.55 ? 0.1 : 0);
+    const result: ShotResult = roll < killChance ? 'kill' : roll < killChance + 0.25 ? 'injure' : 'miss';
+    if (result === 'kill') this.kill(target);
+    else if (result === 'injure') this.injure(target, 6);
     this.harshness += 0.2;
-    if (hits > 0) this.notePressIfNear(tx, tz);
-    return true;
-  }
-
-  /** Granada aturdidora al grupo más cercano: todos los de alrededor quedan paralizados 3 s. */
-  private flashbang(u: Unit): boolean {
-    const spot = this.densestPoint(u.x, u.z, 9, 0) ?? this.nearestProtester(u.x, u.z, 9, 0);
-    if (!spot) return false;
-    this.grid.query(spot.x, spot.z, 3.2, this.near2);
-    for (const i of this.near2) {
-      const p = this.protesters[i];
-      if (!isUpright(p) || Math.hypot(p.x - spot.x, p.z - spot.z) > 3.2) continue;
-      p.stunned = 3;
-      p.resolve -= 0.2;
-    }
-    this.events.push({ type: 'flash', fromX: u.x, fromZ: u.z, toX: spot.x, toZ: spot.z });
-    this.anger = Math.min(1, this.anger + 0.004);
-    this.harshness += 0.3;
-    this.notePressIfNear(spot.x, spot.z);
-    return true;
+    this.events.push({ type: 'liveShot', fromX: u.x, fromZ: u.z, toX: target.x, toZ: target.z, result });
+    if (!u.hidden) this.notePressIfNear(target.x, target.z, 0.5);
+    this.terror(target.x, target.z, 6, 0.3);
   }
 
   /**
@@ -1476,18 +1410,19 @@ export class RiotSim {
       if (p.state === 'fleeing' && Math.hypot(p.x - u.x, p.z - u.z) < 6) p.chased = true;
     }
 
-    // Arrastrando a alguien: lo lleva pegado detrás hasta su posición y allí queda detenido.
+    // Lo lleva montado en la moto (entre los dos agentes) hasta la puerta del palacio: allí queda detenido.
     if (u.carryId !== null) {
       const p = this.protesters[u.carryId];
       if (!p || p.state !== 'injured') {
         u.carryId = null;
       } else {
-        p.x = u.x - Math.sin(u.heading) * 0.9;
-        p.z = u.z - Math.cos(u.heading) * 0.9;
+        p.x = u.x;
+        p.z = u.z;
         p.downTimer = 5;
-        u.targetX = u.homeX;
-        u.targetZ = u.homeZ;
-        if (Math.hypot(u.x - u.homeX, u.z - u.homeZ) < 1) {
+        const gateX = clamp(u.homeX, -5, 5);
+        u.targetX = gateX;
+        u.targetZ = MOTO_JAIL_Z;
+        if (Math.hypot(u.x - gateX, u.z - MOTO_JAIL_Z) < 1.2) {
           p.state = 'gone';
           u.carryId = null;
           u.cooldown = 2.5;
@@ -1496,6 +1431,8 @@ export class RiotSim {
           this.events.push({ type: 'arrest', x: p.x, z: p.z });
           this.notePressIfNear(p.x, p.z);
           if (p.kind === 'lider') this.leaderDown(p, 'arrest');
+          u.targetX = u.homeX; // y vuelve a su puesto
+          u.targetZ = u.homeZ;
         }
         return;
       }
@@ -1522,7 +1459,7 @@ export class RiotSim {
       return;
     }
     if (u.cooldown > 0 || Math.hypot(u.x - u.homeX, u.z - u.homeZ) > 1) return;
-    const leader = this.protesterAt(u.homeX, u.homeZ, 20, (p) => p.kind === 'lider' && p.marked > 0 && p.state !== 'gathering')
+    const leader = this.protesterAt(u.homeX, u.homeZ, 20, (p) => p.marked > 0 && p.state !== 'gathering')
       ?? this.protesterAt(u.homeX, u.homeZ, 12, (p) => p.kind === 'lider' && p.state !== 'gathering');
     const spot = leader ? { x: leader.x, z: leader.z } : this.densestPoint(u.homeX, u.homeZ, 16, 0);
     if (!spot || (!leader && (spot as { count: number }).count < 3)) return;
@@ -1592,7 +1529,7 @@ export class RiotSim {
     let bestScore = Infinity;
     for (const p of this.protesters) {
       if (p.kind === 'prensa' || (p.state !== 'advancing' && p.state !== 'occupying')) continue;
-      const marked = p.kind === 'lider' && p.marked > 0;
+      const marked = p.marked > 0;
       const d = Math.hypot(p.x - u.homeX, p.z - u.homeZ);
       if (d > (marked ? 18 : (def.range ?? 12))) continue;
       if (!marked && this.crowdAround(p.x, p.z, 3) >= 8) continue; // demasiado protegido
@@ -1725,7 +1662,6 @@ export class RiotSim {
       if (p.state === 'gone' || p.state === 'dead') continue;
       p.throwCd -= dt;
       p.marked = Math.max(0, p.marked - dt);
-      p.stunned = Math.max(0, p.stunned - dt);
 
       if (p.state === 'injured') {
         p.downTimer -= dt;
@@ -1789,7 +1725,6 @@ export class RiotSim {
   }
 
   private useWeapon(p: Protester): void {
-    if (p.stunned > 0) return;
     const gun = p.weapon === 'arma' && this.stage >= 3;
     const molotov = p.weapon === 'molotov' && this.stage >= 3;
     const rock = this.stage >= 1 && (p.weapon === 'piedra' || ((p.weapon === 'molotov' || p.weapon === 'arma') && !molotov && !gun));
@@ -1836,7 +1771,6 @@ export class RiotSim {
 
   /** Si la fuerza se usa cerca de la prensa, el mundo entero se entera. */
   private notePressIfNear(x: number, z: number, weight = 1): void {
-    if (this.jamTimer > 0) return;
     for (const id of this.pressIds) {
       const p = this.protesters[id];
       if (!isUpright(p) || p.throwCd > 0) continue;
@@ -1887,7 +1821,6 @@ export class RiotSim {
       won,
       reason,
       total: this.total,
-      gadgetsUsed: { ...this.gadgetUsed },
       dispersed: this.dispersed + fleeing,
       elapsed: this.elapsed,
       avgForce: this.forceIntegral / Math.max(this.elapsed, 1),
@@ -1964,7 +1897,7 @@ export class RiotSim {
     let best: Unit | null = null;
     let bestD = range;
     for (const u of this.units) {
-      if (UNITS[u.type].flying) continue;
+      if (UNITS[u.type].flying || u.hidden) continue;
       const d = Math.hypot(u.x - x, u.z - z);
       if (d < bestD) {
         bestD = d;

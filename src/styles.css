@@ -768,3 +768,5 @@ kbd {
 .gadget-name { flex: 1; }
 .gadget-count { color: var(--gold); font-weight: 800; }
 .force-info.gadget { border-color: var(--gold); }
+.gadget-btn.off { opacity: 0.45; }
+.gadget-btn.locked .gadget-name { color: var(--muted); }

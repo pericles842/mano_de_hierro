@@ -6,7 +6,6 @@ export type UnitType =
   | 'moto'
   | 'capture'
   | 'negotiator'
-  | 'k9'
   | 'sniper'
   | 'colectivo'
   | 'barricade'
@@ -88,7 +87,6 @@ export const UNIT_ORDER: readonly UnitType[] = [
   'moto',
   'capture',
   'negotiator',
-  'k9',
   'sniper',
   'colectivo',
   'barricade',
@@ -239,32 +237,13 @@ export const UNITS: Record<UnitType, UnitDef> = {
     integrity: 30,
     range: 8,
   },
-  k9: {
-    ...BASE,
-    type: 'k9',
-    category: 'policia',
-    name: 'Brigada canina',
-    icon: '🐕',
-    description: 'Agente con perro. Asusta mucho a la gente tranquila (los radicales se enfurecen) en cualquier fase. Desde Contención agresiva muerde: el mordido cae y huye. Persigue a los que escapan.',
-    provoke: 0.0007,
-    price: 160,
-    upkeep: 12,
-    radius: 0.55,
-    rowSpacing: 1.6,
-    speed: 5,
-    pushRadius: 1.6,
-    dispersal: 0.15,
-    presence: { radius: 6, strength: 0.1, byStage: [1, 1, 1, 0.5] },
-    integrity: 60,
-    cooldown: 3,
-  },
   sniper: {
     ...BASE,
     type: 'sniper',
     category: 'especiales',
     name: 'Francotirador',
     icon: '🎯',
-    description: 'Colócalo donde quieras sobre la azotea del palacio: nadie le alcanza. Solo con Mano dura: abate a los armados, luego a los líderes y a los radicales. Cada líder abatido desmoraliza a la plaza.',
+    description: 'Colócalo donde quieras sobre la azotea del palacio: nadie le alcanza. Vigila y marca a los objetivos de alto valor (líderes, armados, radicales) para capturas y motos. Con Mano dura los asesina, pero tarda en apuntar; cada disparo aterroriza a la plaza.',
     provoke: 0.0004,
     price: 350,
     upkeep: 25,
@@ -285,19 +264,18 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false, // no se repliegan por la moral: van a lo suyo
     name: 'Colectivo paramilitar',
     icon: '🏴',
-    description: 'Civiles leales en moto. Atacan por su cuenta a cualquier nivel de fuerza: embisten y apalean. No visten uniforme: la prensa los asocia menos al régimen. Impredecibles: con la plaza encendida, a veces se les va la mano.',
+    description: 'Civiles leales al gobierno, sin uniforme. Se esconden en las esquinas o entre la multitud y desde ahí intimidan muchísimo y disparan con pistola, a cualquier nivel de fuerza. Escondidos, ni las piedras ni la prensa los señalan.',
     provoke: 0.001,
     price: 120,
     upkeep: 8,
-    radius: 0.6,
-    halfLength: 0.5,
-    axis: 'z',
-    rowSpacing: 1.8,
-    speed: 7.5,
-    pushRadius: 1.8,
-    dispersal: 0.2,
-    presence: { radius: 6, strength: 0.07, byStage: [1, 1, 0.6, 0.3] },
-    integrity: 55,
+    radius: 0.45,
+    rowSpacing: 1.4,
+    speed: 4.2,
+    pushRadius: 0,
+    dispersal: 0,
+    presence: { radius: 7, strength: 0.14, byStage: [1, 1, 1, 0.6] },
+    integrity: 50,
+    range: 10,
   },
   barricade: {
     ...BASE,
