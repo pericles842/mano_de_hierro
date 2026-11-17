@@ -8,7 +8,6 @@ import type { SpawnId } from '../data/riots';
 import { PROTESTER_KINDS, WEAPON_NAMES } from '../data/protesterKinds';
 import { UNITS, isRooftop, isVehicle, type UnitType } from '../data/units';
 import { PALACE_ROOF } from '../sim/riot/map';
-import { GADGETS, GADGET_ORDER, type GadgetId } from '../data/gadgets';
 import { RtsCamera } from '../input/RtsCamera';
 import { riotHeadline, type NewsFeed } from '../news/NewsFeed';
 import { RiotView, type GhostPlacement } from '../render/RiotView';
@@ -106,7 +105,6 @@ export class RiotScreen implements Screen {
       },
       onMute: () => audio.toggleMute(),
       onForceHover: () => this.tutorialSignal('force'),
-      onGadget: (id) => this.triggerGadget(id),
       onStartNow: () => {
         this.sim.startNow();
         o.loop.paused = false;
@@ -165,8 +163,6 @@ export class RiotScreen implements Screen {
       } else if (e.type === 'leaderDown') {
         const how = e.how === 'killed' ? '🕯️ Abatido un líder' : '🕶️ Arrestado un líder';
         this.hud.toast(`${how}: la plaza se desmoraliza (quedan ${e.left})`, 'good');
-      } else if (e.type === 'jam') {
-        this.hud.toast('📵 Comunicaciones cortadas: llegará menos gente y la prensa no transmite', 'neutral');
       } else if (e.type === 'soldierDown') {
         this.hud.toast(`🩸 ${UNITS[e.unitType].name}: agentes caídos`, 'bad');
       }
@@ -349,28 +345,6 @@ export class RiotScreen implements Screen {
     const dist = this.view.camera.position.distanceTo(target);
     if (Math.abs(dist - this.cameraStartDist) > 3) this.tutorialSignal('zoom');
     this.tutorial.update(frameDt);
-  }
-
-  // ─── Gadgets ──────────────────────────────────────────────────────────
-
-  private triggerGadget(id: GadgetId): void {
-    const g = GADGETS[id];
-    if (this.sim.gadgetUses[id] <= 0) {
-      this.hud.toast(`${g.icon} ${g.name}: sin usos (compra cargas en el despacho)`, 'neutral');
-      audio.play('cancel');
-      return;
-    }
-    if (this.sim.planning) {
-      this.hud.toast(`${g.icon} ${g.name}: espera a que empiece la protesta`, 'neutral');
-      audio.play('cancel');
-      return;
-    }
-    if (!this.sim.useGadget(id)) {
-      this.hud.toast(`${g.icon} ${g.name}: ningún agente puede usarlo ahora`, 'neutral');
-      audio.play('cancel');
-      return;
-    }
-    if (id !== 'inhibidor') this.hud.toast(`${g.icon} ${g.name}: ¡ahora!`, 'neutral');
   }
 
   // ─── Ficha del manifestante bajo el ratón ──────────────────────────────
@@ -799,9 +773,6 @@ export class RiotScreen implements Screen {
     } else if (e.code === 'KeyR' && this.placeType) {
       this.rowAngle = (this.rowAngle + Math.PI / 4) % (Math.PI * 2);
       audio.play('click');
-    } else if (/^Digit[5-7]$/.test(e.code)) {
-      const id = GADGET_ORDER.find((g) => GADGETS[g].key === e.code.slice(5));
-      if (id) this.triggerGadget(id);
     } else if (/^Digit[1-4]$/.test(e.code)) {
       this.requestForce(Number(e.code.slice(5)) - 1);
     } else if (e.code === 'KeyF') {

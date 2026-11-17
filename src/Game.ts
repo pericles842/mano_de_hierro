@@ -13,11 +13,9 @@ import {
   applyEventOption,
   applyRiotResult,
   checkStatus,
-  consumeGadgetCharges,
   createRegime,
   devUnlock,
   endDay,
-  gadgetUsesFor,
   releasePrisoners,
   rollEvent,
   setPayLevel,
@@ -200,7 +198,6 @@ export class Game {
       upgrades: this.regime.upgrades,
       seed: this.rng.int(1, 1e9),
       planning: PLANNING_TIME,
-      gadgets: gadgetUsesFor(this.regime),
     });
     if (this.devMode) sim.devUnlockAll();
     this.hud.setVisible(false);
@@ -284,7 +281,6 @@ export class Game {
 
   private onRiotFinished(riot: RiotInstance, result: RiotResult): void {
     const def = RIOTS[riot.defId];
-    if (!this.devMode) consumeGadgetCharges(this.regime, result.gadgetsUsed);
     if (!result.won) {
       // Perder la protesta no cuesta el día: reintentar es gratis. El día solo avanza si el jugador lo fuerza.
       this.showCountry();

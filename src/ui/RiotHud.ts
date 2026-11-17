@@ -1,6 +1,5 @@
 import { CROWD_STAGES } from '../data/crowdStages';
 import { FORCE_LEVELS, type ForceLevel } from '../data/forceLevels';
-import { GADGETS, GADGET_ORDER, type GadgetDef, type GadgetId } from '../data/gadgets';
 import { CATEGORY_NAMES, UNITS, VISIBLE_UNITS, isVehicle, type UnitCategory, type UnitType } from '../data/units';
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { Unit } from '../sim/riot/types';
@@ -45,8 +44,6 @@ export interface RiotHudHandlers {
   onDev(): void;
   /** El ratón pasó por un nivel de fuerza (el tutorial lo usa). */
   onForceHover?(level: number): void;
-  /** Activar un gadget (pimienta, flash, inhibidor). */
-  onGadget?(id: GadgetId): void;
   /** Terminar la preparación y que empiece la protesta. */
   onStartNow(): void;
 }
@@ -80,7 +77,6 @@ export class RiotHud {
   private readonly cards = new Map<UnitType, { el: HTMLElement; count: HTMLElement }>();
   private readonly tabs: HTMLButtonElement[] = [];
   private readonly forceButtons: HTMLButtonElement[];
-  private readonly gadgetButtons = new Map<GadgetId, { el: HTMLButtonElement; count: HTMLElement }>();
   private readonly speedButtons: { el: HTMLButtonElement; speed: number }[];
   private readonly pauseButton: HTMLButtonElement;
   private readonly muteButton: HTMLButtonElement;
@@ -133,29 +129,11 @@ export class RiotHud {
       });
       return b;
     });
-    // Gadgets desbloqueados: un solo uso por protesta (más las cargas compradas).
-    const owned = GADGET_ORDER.filter((g) => sim.gadgetUses[g] > 0);
-    for (const g of owned) {
-      const def = GADGETS[g];
-      const count = h('span', { class: 'gadget-count' });
-      const b = h('button', { class: 'gadget-btn', onClick: () => handlers.onGadget?.(g) }, [
-        h('span', { class: 'force-icon', text: def.icon }),
-        h('span', { class: 'gadget-name', text: `${def.key}. ${def.name}` }),
-        count,
-      ]);
-      b.addEventListener('pointerenter', () => showGadgetInfo(forceInfo, def, sim.gadgetUses[g]));
-      b.addEventListener('pointerleave', () => {
-        forceInfo.style.display = 'none';
-      });
-      this.gadgetButtons.set(g, { el: b, count });
-    }
     const force = h('div', { class: 'force-panel panel' }, [
       forceInfo,
       h('div', { class: 'panel-title small', text: 'Nivel de fuerza' }),
       ...this.forceButtons,
       h('div', { class: 'hint', text: 'Más fuerza dispersa más rápido, pero enfurece a la gente: la protesta escala y se arma.' }),
-      owned.length > 0 ? h('div', { class: 'panel-title small gadget-title', text: 'Gadgets' }) : null,
-      ...[...this.gadgetButtons.values()].map((g) => g.el),
     ]);
 
     this.pauseButton = h('button', { class: 'chip icon-chip', title: 'Pausa (Espacio)', onClick: () => handlers.onPause() }, [icon('pause', 14)]);
@@ -316,12 +294,6 @@ export class RiotHud {
       ? ` · 🩸 Muertos: ${sim.deaths} · Heridos: ${sim.injuredCount} · Agentes caídos: ${sim.soldiersKilled}`
       : '';
     this.counts.textContent = `Protestando: ${sim.activeCount} · 📣 Líderes: ${sim.leadersLeft} · Dispersados: ${sim.dispersed} · Detenidos: ${sim.arrests} · Por llegar: ${sim.total - sim.spawned}${casualties}`;
-    for (const [g, b] of this.gadgetButtons) {
-      const n = sim.gadgetUses[g];
-      b.count.textContent = `×${n}`;
-      b.el.disabled = n <= 0 || sim.planning;
-    }
-
     for (const [type, card] of this.cards) {
       const n = sim.available[type];
       card.count.textContent = `×${n}`;
@@ -394,22 +366,5 @@ function showForceInfo(el: HTMLElement, f: ForceLevel): void {
       ]),
     )),
     h('div', { class: 'unit-info-hint', text: FORCE_CONSEQUENCES[f.level] }),
-  );
-}
-
-/** Ficha del gadget bajo el ratón (misma posición que la del nivel de fuerza). */
-function showGadgetInfo(el: HTMLElement, g: GadgetDef, uses: number): void {
-  el.style.display = '';
-  el.className = 'force-info gadget';
-  el.replaceChildren(
-    h('div', { class: 'unit-info-head' }, [
-      h('span', { class: 'unit-info-icon', text: g.icon }),
-      h('div', {}, [
-        h('div', { class: 'unit-info-name', text: g.name }),
-        h('div', { class: 'unit-info-tag' }, ['Tecla ', h('kbd', { text: g.key }), ` · ${uses} uso${uses === 1 ? '' : 's'}`]),
-      ]),
-    ]),
-    h('div', { class: 'unit-info-desc', text: g.description }),
-    h('div', { class: 'unit-info-hint', text: 'Un solo uso por protesta. Compra cargas extra en el despacho.' }),
   );
 }

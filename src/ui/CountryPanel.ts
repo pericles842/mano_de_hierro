@@ -3,14 +3,12 @@ import { CROWD_STAGES, stageForAnger } from '../data/crowdStages';
 import { DIPLOMACY, diplomacyBlocked, internationalStatus, type DiplomacyAction } from '../data/diplomacy';
 import { RIOTS } from '../data/riots';
 import { BUYABLE_UNITS, CATEGORY_NAMES, UNITS, UNIT_ORDER, type UnitCategory } from '../data/units';
-import { GADGETS, type GadgetId } from '../data/gadgets';
 import { UPGRADES, UPGRADE_BRANCHES, UPGRADE_ORDER, type UpgradeBranch, type UpgradeId } from '../data/upgrades';
 import {
   EMERGENCY_ARMY_SQUADS,
   EMERGENCY_COST,
   PAY_LEVELS,
   buyUnit,
-  buyGadgetCharge,
   buyUpgrade,
   declareEmergency,
   projectedIncome,
@@ -274,7 +272,7 @@ export class CountryPanel {
       ]),
       ...groups,
       section('Estado de Excepción', 'El ejército sale a la calle por un día. Con lealtad baja, los soldados pueden negarse o desertar.', [emergency]),
-      ...(['antidisturbios', 'barricadas', 'gadgets', 'unidades'] as UpgradeBranch[]).map((branch) =>
+      ...(['antidisturbios', 'barricadas', 'unidades'] as UpgradeBranch[]).map((branch) =>
         section(
           UPGRADE_BRANCHES[branch],
           branch === 'barricadas' ? 'Niveles: madera → concreto → pinchos.' : null,
@@ -296,9 +294,7 @@ export class CountryPanel {
         h('div', { class: 'cp-card-title', text: def.name }),
         h('div', { class: 'cp-card-desc', text: locked && req ? `Requiere «${UPGRADES[req].name}». ${def.description}` : def.description }),
       ]),
-      owned && def.branch === 'gadgets'
-        ? this.gadgetChargeButton(id as GadgetId)
-        : owned
+      owned
         ? h('span', { class: 'upgrade-owned', text: '✔' })
         : h('button', {
             class: 'btn small',
@@ -308,24 +304,6 @@ export class CountryPanel {
               if (buyUpgrade(s, id)) this.change();
             },
           }),
-    ]);
-  }
-
-  /** Gadget desbloqueado: muestra los usos y permite comprar cargas extra. */
-  private gadgetChargeButton(id: GadgetId): HTMLElement {
-    const s = this.state;
-    const price = GADGETS[id].chargePrice;
-    return h('div', { class: 'gadget-charges' }, [
-      h('span', { class: 'upgrade-owned', text: `1 + ${s.gadgetCharges[id]}`, title: 'Usos por protesta: 1 gratis + cargas compradas' }),
-      h('button', {
-        class: 'btn small',
-        text: `+1 · ${money(price)}`,
-        title: 'Comprar una carga extra',
-        disabled: s.treasury < price,
-        onClick: () => {
-          if (buyGadgetCharge(s, id)) this.change();
-        },
-      }),
     ]);
   }
 

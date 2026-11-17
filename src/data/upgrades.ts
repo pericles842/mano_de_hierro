@@ -7,9 +7,7 @@ export type UpgradeId =
   | 'trajes'
   | 'pinchos'
   | 'vallas'
-  | 'pimienta'
-  | 'flash'
-  | 'inhibidor'
+
   | 'tanques'
   | 'concreto'
   | 'megafonos'
@@ -18,7 +16,7 @@ export type UpgradeId =
   | 'municion';
 
 /** Rama del despacho en la que aparece la mejora. */
-export type UpgradeBranch = 'antidisturbios' | 'barricadas' | 'gadgets' | 'unidades' | 'economia';
+export type UpgradeBranch = 'antidisturbios' | 'barricadas' | 'unidades' | 'economia';
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -34,7 +32,6 @@ export interface UpgradeDef {
 export const UPGRADE_BRANCHES: Record<UpgradeBranch, string> = {
   antidisturbios: 'Antidisturbios: equipo',
   barricadas: 'Barricadas',
-  gadgets: 'Gadgets (1 uso gratis por protesta)',
   unidades: 'Otras unidades',
   economia: 'Economía',
 };
@@ -48,9 +45,6 @@ export const UPGRADE_ORDER: readonly UpgradeId[] = [
   'concreto',
   'pinchos',
   'vallas',
-  'pimienta',
-  'flash',
-  'inhibidor',
   'municion',
   'tanques',
   'megafonos',
@@ -123,30 +117,6 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     branch: 'barricadas',
     requires: 'concreto',
   },
-  pimienta: {
-    id: 'pimienta',
-    name: 'Gas pimienta',
-    icon: '🌶️',
-    description: 'Gadget (tecla 5): un 40% de tus antidisturbios, muros y perros rocía a quien tiene delante.',
-    price: 300,
-    branch: 'gadgets',
-  },
-  flash: {
-    id: 'flash',
-    name: 'Granadas aturdidoras',
-    icon: '💥',
-    description: 'Gadget (tecla 6): un 40% de tus antidisturbios y muros lanza flashes: el grupo queda paralizado 3 s.',
-    price: 350,
-    branch: 'gadgets',
-  },
-  inhibidor: {
-    id: 'inhibidor',
-    name: 'Camión inhibidor',
-    icon: '📵',
-    description: 'Gadget (tecla 7): corta las comunicaciones 30 s. Llega menos gente y la prensa no transmite.',
-    price: 500,
-    branch: 'gadgets',
-  },
   vallas: {
     id: 'vallas',
     name: 'Vallas metálicas desplegables',
@@ -211,7 +181,6 @@ export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
       moto: 1,
       capture: 1,
       negotiator: 1,
-      k9: 1,
       sniper: 1,
       colectivo: 1,
       barricade: has('concreto') ? 2 : 1,
@@ -235,7 +204,6 @@ export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
       moto: 1,
       capture: padded,
       negotiator: 1,
-      k9: 1,
       sniper: 1,
       colectivo: 1,
       barricade: 1,

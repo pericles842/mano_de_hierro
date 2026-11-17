@@ -1,7 +1,7 @@
 import type { VoxelParticles } from './particles';
 
 /** Tipo de efecto: el megáfono del negociador o el forcejeo de la infantería. */
-export type WaveKind = 'megaphone' | 'push' | 'leader' | 'flash' | 'medic' | 'stun';
+export type WaveKind = 'megaphone' | 'push' | 'leader' | 'flash' | 'medic';
 
 interface WaveStyle {
   /** Segundos entre soplos de una misma tropa. */
@@ -30,8 +30,6 @@ const STYLES: Record<WaveKind, WaveStyle> = {
   flash: { interval: 2.6, count: 2, speed: 0.4, spread: Math.PI * 2, size: 0.15, life: 0.18, color: 0xffffff },
   /** Médico: chispa verde sobre la cabeza. */
   medic: { interval: 1.3, count: 1, speed: 0.15, spread: Math.PI * 2, size: 0.11, life: 0.7, color: 0x22c55e },
-  /** Aturdido por un flash: chispitas amarillas girando sobre la cabeza. */
-  stun: { interval: 0.3, count: 1, speed: 0.5, spread: Math.PI * 2, size: 0.09, life: 0.4, color: 0xfff7ae },
 };
 
 /** Desde dónde salen, en coordenadas locales de la tropa (+z = hacia delante). */
@@ -41,7 +39,6 @@ const ORIGINS: Record<WaveKind, { x: number; y: number; z: number }> = {
   leader: { x: 0.3, y: 1.5, z: 0.3 },
   flash: { x: 0.2, y: 1.55, z: 0.35 },
   medic: { x: 0, y: 1.75, z: 0 },
-  stun: { x: 0, y: 1.9, z: 0 },
 };
 
 /** Efecto visual de "están haciendo algo": negociador hablando y agentes repeliendo. */
