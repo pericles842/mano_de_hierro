@@ -1,6 +1,8 @@
 import type { CrowdStage } from '../../data/crowdStages';
 import type { SpawnId } from '../../data/riots';
 import type { UnitType } from '../../data/units';
+import type { DemandId } from '../../data/demands';
+import type { ObjectiveId } from '../../data/objectives';
 
 export type ProtesterKind = 'pacifico' | 'radical' | 'lider' | 'escudero' | 'prensa' | 'medico';
 /** 'injured': en el suelo un rato (los médicos pueden levantarlo). 'dead': cuerpo caído, se queda en la plaza. */
@@ -158,7 +160,22 @@ export type RiotEvent =
   | { type: 'marchStart' }
   | { type: 'planningEnd' }
   | { type: 'beating'; x: number; z: number }
+  | { type: 'demand'; id: DemandId }
   | { type: 'leaderDown'; x: number; z: number; how: 'arrest' | 'killed'; left: number };
+
+/** Qué calentó a la multitud: se acumula durante la protesta y se muestra en el informe. */
+export type AngerSource =
+  | 'multitud'
+  | 'fuerza'
+  | 'provocacion'
+  | 'palizas'
+  | 'gas'
+  | 'perdigones'
+  | 'disparos'
+  | 'muertes'
+  | 'arrestos'
+  | 'ejercito'
+  | 'exigencias';
 
 export interface RiotResult {
   /** Ganas si el palacio resiste hasta el final. Si llega a 0, pierdes la protesta (y puedes reintentarla). */
@@ -191,4 +208,16 @@ export interface RiotResult {
   soldiersKilled: number;
   /** Segundos-tanqueta en la plaza (cuestan presión internacional). */
   tanquetaSeconds: number;
+  /** Ira aportada por cada causa durante la protesta. */
+  angerSources?: Partial<Record<AngerSource, number>>;
+  /** Objetivo secundario de la protesta y si se cumplió (solo cuenta si ganas). */
+  objective?: ObjectiveId;
+  objectiveDone?: boolean;
+  /** Exigencia de la multitud y si cediste (null: no respondiste). */
+  demand?: { id: DemandId; accepted: boolean | null };
+  leadersDown?: number;
+  vehiclesUsed?: number;
+  colectivosUsed?: number;
+  /** Tropas que siguen en pie al terminar (ganan veteranía). */
+  survivors?: Partial<Record<UnitType, number>>;
 }

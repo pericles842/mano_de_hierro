@@ -69,6 +69,23 @@ export interface UnitDef {
   hidden?: boolean;
 }
 
+/**
+ * Día de la campaña a partir del cual se puede comprar cada tropa: el arsenal crece
+ * a medida que la crisis se agrava. Lo que no aparece aquí está disponible desde el día 1.
+ */
+export const UNLOCK_DAY: Partial<Record<UnitType, number>> = {
+  shotgun: 2,
+  moto: 3,
+  gastruck: 4,
+  tanqueta: 5,
+  sniper: 6,
+  colectivo: 7,
+};
+
+export function unlockDay(type: UnitType): number {
+  return UNLOCK_DAY[type] ?? 1;
+}
+
 /** Francotiradores: se apostan en la azotea del palacio (no se colocan en la plaza). */
 export function isRooftop(type: UnitType): boolean {
   return type === 'sniper';
@@ -186,6 +203,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     ...BASE,
     type: 'moto',
     category: 'policia',
+    infantry: false, // van a lo suyo: no se repliegan por la moral
     name: 'Motorizados',
     icon: '🏍️',
     description: 'Agresivos y por su cuenta: embisten grupos, arrastran a líderes y manifestantes fuera de la plaza y persiguen a los que huyen. Su presencia provoca.',

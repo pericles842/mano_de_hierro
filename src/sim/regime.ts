@@ -2,10 +2,12 @@ import type { Random } from '../core/Random';
 import { CAMPAIGN_DAYS, DEFAULT_NAMES } from '../data/country';
 import { DIPLOMACY, diplomacyBlocked, type DiplomacyId } from '../data/diplomacy';
 import { EVENTS, type EventOption, type GameEventDef } from '../data/events';
-import { RIOTS, RIOT_LIST, type RiotDef, type RiotId } from '../data/riots';
-import { UNITS, UNIT_ORDER, type UnitType } from '../data/units';
+import { FINAL_RIOT, RIOTS, RIOT_LIST, type RiotDef, type RiotId } from '../data/riots';
+import { UNITS, UNIT_ORDER, unlockDay, type UnitType } from '../data/units';
 import { UPGRADES, type UpgradeId } from '../data/upgrades';
 import type { RiotResult } from './riot/types';
+import { DEMANDS } from '../data/demands';
+import { OBJECTIVES } from '../data/objectives';
 
 export type PayLevel = 0 | 1 | 2;
 
@@ -50,6 +52,12 @@ export interface RegimeState extends PlayerNames {
   /** Eventos recientes, para no repetirlos seguidos. */
   recentEvents: string[];
   activeRiots: RiotInstance[];
+  /** Mártires recientes: la próxima protesta llega más grande y furiosa. Se olvidan poco a poco. */
+  martyrs: number;
+  /** Cuánto se ha recurrido a los colectivos: cuanto más, más probable que actúen por su cuenta. */
+  colectivoHeat: number;
+  /** Experiencia de cada tipo de tropa: los supervivientes se vuelven veteranos. */
+  unitXp: Record<UnitType, number>;
   status: RegimeStatus;
   nextRiotUid: number;
 }
@@ -104,6 +112,9 @@ export function createRegime(rng: Random, names: PlayerNames = DEFAULT_NAMES): R
     prisoners: 0,
     recentEvents: [],
     activeRiots: [],
+    martyrs: 0,
+    colectivoHeat: 0,
+    unitXp: Object.fromEntries(UNIT_ORDER.map((t) => [t, 0])) as Record<UnitType, number>,
     status: 'playing',
     nextRiotUid: 1,
   };
@@ -111,9 +122,18 @@ export function createRegime(rng: Random, names: PlayerNames = DEFAULT_NAMES): R
   return state;
 }
 
+/** Nivel de veteranía (0-3) de un tipo de tropa. */
+export function veteranLevel(state: RegimeState, type: UnitType): number {
+  return Math.min(3, Math.floor(state.unitXp[type] / XP_PER_LEVEL));
+}
+
+export function veteranLevels(state: RegimeState): Partial<Record<UnitType, number>> {
+  return Object.fromEntries(UNIT_ORDER.map((t) => [t, veteranLevel(state, t)]));
+}
+
 export function buyUnit(state: RegimeState, type: UnitType): boolean {
   const price = UNITS[type].price;
-  if (state.treasury < price) return false;
+  if (state.treasury < price || state.day < unlockDay(type)) return false;
   state.treasury -= price;
   state.stock[type]++;
   return true;
@@ -282,6 +302,29 @@ export function applyRiotResult(state: RegimeState, result: RiotResult, def: Rio
   d.intlPressure += (result.pressIncidents * 2 + result.armyDeployed * 4 + result.harshness * 0.05) * sens;
   d.popularity -= result.pressIncidents * 0.5;
   d.loyalty -= result.deserted * 3;
+  // Memoria: los muertos se convierten en mártires; los colectivos dejan huella; los supervivientes aprenden.
+  state.martyrs += result.leadersKilled * 2 + Math.floor(result.deaths / 4);
+  state.colectivoHeat += result.colectivosUsed ?? 0;
+  for (const [type, n] of Object.entries(result.survivors ?? {}) as [UnitType, number][]) {
+    if (type !== 'barricade' && type !== 'army') state.unitXp[type] += n;
+  }
+  // Objetivo secundario cumplido: recompensa.
+  if (result.objective && result.objectiveDone) {
+    const r = OBJECTIVES[result.objective].reward;
+    d.treasury += r.treasury ?? 0;
+    d.loyalty += r.loyalty ?? 0;
+    d.popularity += r.popularity ?? 0;
+  }
+  // Cediste a una exigencia: el régimen paga el precio.
+  if (result.demand?.accepted) {
+    const e = DEMANDS[result.demand.id].effects;
+    d.treasury += e.treasury ?? 0;
+    d.popularity += e.popularity ?? 0;
+    d.loyalty += e.loyalty ?? 0;
+    d.intlPressure += e.intlPressure ?? 0;
+    d.unrest += e.unrest ?? 0;
+    if (e.releasePrisoners) state.prisoners = Math.max(0, state.prisoners - e.releasePrisoners);
+  }
   applyDeltas(state, d);
   return d;
 }
@@ -317,6 +360,19 @@ export function endDay(state: RegimeState, handledUid: number | null, rng: Rando
     d.popularity += 1;
   }
   if (sanctionsFactor(state) < 1) notes.push('Las sanciones internacionales recortan tus ingresos.');
+  // Mártires: la próxima protesta llega más grande y furiosa. Se olvidan poco a poco.
+  if (state.martyrs > 0) {
+    notes.push(`🕯️ Velas por los mártires en cada esquina: la próxima protesta llegará más grande y furiosa.`);
+    d.unrest += Math.min(4, state.martyrs * 0.5);
+  }
+  // Colectivos: si los usas mucho, un día actúan por su cuenta.
+  if (state.colectivoHeat >= 3 && rng.chance(Math.min(0.6, state.colectivoHeat * 0.1))) {
+    d.intlPressure += 6;
+    d.unrest += 4;
+    d.popularity -= 3;
+    state.colectivoHeat = Math.max(0, state.colectivoHeat - 2);
+    notes.push('🏴 Los colectivos actuaron por su cuenta esta noche: asaltaron un barrio opositor. Las imágenes dan la vuelta al mundo.');
+  }
   if (state.unrest > 60) notes.push('La molestia social es altísima: las protestas llegarán armadas y furiosas.');
 
   applyDeltas(state, d);
@@ -327,6 +383,12 @@ export function endDay(state: RegimeState, handledUid: number | null, rng: Rando
   }
 
   state.day++;
+  state.martyrs = Math.max(0, state.martyrs - 1);
+  state.colectivoHeat = Math.max(0, state.colectivoHeat - 0.5);
+  const story = STORY[state.day];
+  if (story) notes.push(story);
+  const unlocked = UNIT_ORDER.filter((t) => unlockDay(t) === state.day).map((t) => `${UNITS[t].icon} ${UNITS[t].name}`);
+  if (unlocked.length > 0) notes.push(`🔓 Nuevo en el despacho: ${unlocked.join(', ')}.`);
   state.emergency = false;
   state.stock.army = 0;
   state.diplomacyUsed = [];
@@ -343,15 +405,33 @@ export function checkStatus(state: RegimeState): void {
 }
 
 function rollRiots(state: RegimeState, rng: Random): void {
+  // Último día: la Gran Marcha, sola.
+  if (state.day === state.maxDays) {
+    const scale = 1 + state.unrest / 200 + state.martyrs * 0.05;
+    state.activeRiots = [{ uid: state.nextRiotUid++, defId: FINAL_RIOT, scale }];
+    return;
+  }
   const pool = RIOT_LIST.filter((r) => r.minDay <= state.day);
   const extra = (state.popularity < 40 ? 1 : 0) + (state.unrest > 55 ? 1 : 0);
   const count = Math.min(pool.length, 2 + extra);
-  const scale = 1 + (state.day - 1) * 0.05 + (state.popularity < 30 ? 0.2 : 0) + state.unrest / 250;
+  const scale = 1 + (state.day - 1) * 0.05 + (state.popularity < 30 ? 0.2 : 0) + state.unrest / 250 + Math.min(0.3, state.martyrs * 0.06);
   state.activeRiots = rng
     .shuffle(pool)
     .slice(0, count)
     .map((def) => ({ uid: state.nextRiotUid++, defId: def.id, scale }));
 }
+
+/** Experiencia por nivel de veteranía. */
+const XP_PER_LEVEL = 12;
+
+/** La crisis escala a lo largo del mandato: titulares que abren ciertos días. */
+const STORY: Record<number, string> = {
+  4: '📰 La oposición, antes dispersa, empieza a coordinarse por redes sociales.',
+  7: '📰 Los sindicatos amenazan con una huelga general. Las protestas serán más grandes.',
+  10: '📰 Huelga general convocada: el país se paraliza. Aparecen los primeros grupos armados.',
+  13: '📰 Las embajadas extranjeras recomiendan a sus ciudadanos salir del país.',
+  14: '📰 Mañana, último día del mandato, la oposición convoca «La Gran Marcha» hacia el palacio.',
+};
 
 function applyDeltas(state: RegimeState, d: Deltas): void {
   state.treasury = Math.round(state.treasury + d.treasury);

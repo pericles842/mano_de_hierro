@@ -237,6 +237,12 @@ export class AudioEngine {
         case 'charge':
           this.play('engine');
           break;
+        case 'beating':
+          this.play('rock'); // golpe seco
+          break;
+        case 'leaderDown':
+          this.play('calm');
+          break;
         case 'gas':
           this.play('gasLaunch');
           break;

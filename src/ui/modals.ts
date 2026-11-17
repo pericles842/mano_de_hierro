@@ -6,6 +6,40 @@ import type { RiotDef } from '../data/riots';
 import { releaseEffects, type DayReport, type Deltas, type PlayerNames, type RegimeState, type ReleaseMode } from '../sim/regime';
 import type { RiotResult } from '../sim/riot/types';
 import { h, money, signed } from './dom';
+import { DEMANDS } from '../data/demands';
+import { OBJECTIVES } from '../data/objectives';
+import type { AngerSource } from '../sim/riot/types';
+
+const ANGER_LABELS: Record<AngerSource, string> = {
+  multitud: '👥 La propia multitud (tamaño y molestia social)',
+  fuerza: '✊ Nivel de fuerza',
+  provocacion: '🚔 Tropas que provocan con su presencia',
+  palizas: '🥊 Golpes y palizas',
+  gas: '💨 Gas y agua',
+  perdigones: '💥 Perdigones',
+  disparos: '🔫 Disparos (pistolas, francotiradores, colectivos)',
+  muertes: '🕯️ Muertos',
+  arrestos: '🕶️ Arrestos',
+  ejercito: '🪖 El ejército en la calle',
+  exigencias: '✋ Negarte a sus exigencias',
+};
+
+/** Barras con lo que más calentó a la multitud, de mayor a menor. */
+function angerReport(sources: Partial<Record<AngerSource, number>>): HTMLElement | null {
+  const entries = (Object.entries(sources) as [AngerSource, number][]).filter(([, v]) => v > 0.005).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((a, [, v]) => a + v, 0);
+  if (total <= 0) return null;
+  return h('div', { class: 'anger-report' }, [
+    h('h3', { text: '🔥 Por qué escaló' }),
+    ...entries.slice(0, 5).map(([k, v]) =>
+      h('div', { class: 'anger-row' }, [
+        h('span', { class: 'anger-label', text: ANGER_LABELS[k] }),
+        h('span', { class: 'unit-stat-bar' }, [h('span', { style: `width:${Math.round((v / total) * 100)}%` })]),
+        h('span', { class: 'anger-pct', text: `${Math.round((v / total) * 100)}%` }),
+      ]),
+    ),
+  ]);
+}
 
 interface ModalButton {
   label: string;
@@ -158,6 +192,27 @@ export function showDayReport(
             }),
           ]
         : []),
+      ...(result.objective
+        ? [
+            h('p', {
+              class: result.objectiveDone ? 'good' : 'hint',
+              text: result.objectiveDone
+                ? `🎯 Objetivo cumplido: ${OBJECTIVES[result.objective].name} (${OBJECTIVES[result.objective].rewardText})`
+                : `🎯 Objetivo no cumplido: ${OBJECTIVES[result.objective].name}`,
+            }),
+          ]
+        : []),
+      ...(result.demand && result.demand.accepted !== null
+        ? [
+            h('p', {
+              class: 'hint',
+              text: result.demand.accepted
+                ? `🤝 Cediste: «${DEMANDS[result.demand.id].accept}». ${DEMANDS[result.demand.id].cost}`
+                : `✊ Te negaste: «${DEMANDS[result.demand.id].refuse}».`,
+            }),
+          ]
+        : []),
+      ...[angerReport(result.angerSources ?? {})].filter((n): n is HTMLElement => n !== null),
       deltaRows(riot.deltas),
     );
   }

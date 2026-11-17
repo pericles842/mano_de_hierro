@@ -12,7 +12,8 @@ export type RiotId =
   | 'huelga'
   | 'abuelas'
   | 'trancas'
-  | 'apagon';
+  | 'apagon'
+  | 'granmarcha';
 export type SpawnId = 'sur' | 'este' | 'oeste';
 
 export interface RiotDef {
@@ -238,6 +239,29 @@ export const RIOTS: Record<RiotId, RiotDef> = {
     night: true,
     burnsTires: true,
   },
+  granmarcha: {
+    id: 'granmarcha',
+    name: 'La Gran Marcha',
+    region: 'Todo el país',
+    description:
+      'Último día del mandato. Todas las protestas se unen en una sola marcha hacia el palacio, por las tres calles a la vez. Si aguantas hoy, el país es tuyo. Si no...',
+    mapPos: { x: 0, z: 0 },
+    protesters: 240,
+    radicalShare: 0.15,
+    leaders: 6,
+    aggression: 0.4,
+    duration: 150,
+    spawns: ['sur', 'este', 'oeste'],
+    speedMult: 1,
+    resolveMult: 1.15,
+    intlSensitivity: 1.3,
+    loyaltySensitive: true,
+    /** Nunca sale al azar: es la protesta final de la campaña. */
+    minDay: 999,
+  },
 };
+
+/** La protesta final de la campaña. */
+export const FINAL_RIOT: RiotId = 'granmarcha';
 
 export const RIOT_LIST: readonly RiotDef[] = Object.values(RIOTS);

@@ -16,6 +16,7 @@ import {
   createRegime,
   devUnlock,
   endDay,
+  veteranLevels,
   releasePrisoners,
   rollEvent,
   setPayLevel,
@@ -198,6 +199,10 @@ export class Game {
       upgrades: this.regime.upgrades,
       seed: this.rng.int(1, 1e9),
       planning: PLANNING_TIME,
+      // Clima aleatorio: a veces es de noche, a veces llueve (o las dos cosas).
+      weather: { night: this.rng.chance(0.25), rain: this.rng.chance(0.25) },
+      veterans: veteranLevels(this.regime),
+      martyrs: this.regime.martyrs,
     });
     if (this.devMode) sim.devUnlockAll();
     this.hud.setVisible(false);
@@ -240,7 +245,7 @@ export class Game {
     };
     const stock = Object.fromEntries(UNIT_ORDER.map((t) => [t, 0])) as Record<UnitType, number>;
     Object.assign(stock, { soldier: 10, shield: 2, barricade: 4, negotiator: 1 });
-    const sim = new RiotSim({ def, scale: 1, stock, loyalty: 90, unrest: 0, seed: this.rng.int(1, 1e9), planning: Infinity });
+    const sim = new RiotSim({ def, scale: 1, stock, loyalty: 90, unrest: 0, seed: this.rng.int(1, 1e9), planning: Infinity, demands: false, objectives: false });
     this.hud.setVisible(false);
     this.ticker.setMode('riot');
     this.setScreen(

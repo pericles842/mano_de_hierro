@@ -2,13 +2,14 @@ import { DICTATOR } from '../data/country';
 import { CROWD_STAGES, stageForAnger } from '../data/crowdStages';
 import { DIPLOMACY, diplomacyBlocked, internationalStatus, type DiplomacyAction } from '../data/diplomacy';
 import { RIOTS } from '../data/riots';
-import { BUYABLE_UNITS, CATEGORY_NAMES, UNITS, UNIT_ORDER, type UnitCategory } from '../data/units';
+import { BUYABLE_UNITS, CATEGORY_NAMES, UNITS, UNIT_ORDER, unlockDay, type UnitCategory } from '../data/units';
 import { UPGRADES, UPGRADE_BRANCHES, UPGRADE_ORDER, type UpgradeBranch, type UpgradeId } from '../data/upgrades';
 import {
   EMERGENCY_ARMY_SQUADS,
   EMERGENCY_COST,
   PAY_LEVELS,
   buyUnit,
+  veteranLevel,
   buyUpgrade,
   declareEmergency,
   projectedIncome,
@@ -22,6 +23,7 @@ import {
 } from '../sim/regime';
 import { initialAnger } from '../sim/riot/RiotSim';
 import { bar, h, money, signed } from './dom';
+import { collapsible } from './collapsible';
 
 export interface CountryPanelHandlers {
   onChange(): void;
@@ -71,6 +73,7 @@ export class CountryPanel {
       this.tabBar,
       this.body,
     ]);
+    collapsible(this.root, { icon: '🏛️', title: 'despacho', key: 'despacho' });
     parent.append(this.root);
     this.refresh();
   }
@@ -227,13 +230,17 @@ export class CountryPanel {
               { class: 'unit-grid' },
               BUYABLE_UNITS.filter((t) => UNITS[t].category === cat).map((type) => {
                 const def = UNITS[type];
-                return h('div', { class: 'unit-tile', title: def.description }, [
+                const day = unlockDay(type);
+                const locked = s.day < day;
+                const vet = veteranLevel(s, type);
+                const tip = vet > 0 ? `${def.description} Veteranos (${'★'.repeat(vet)}): más aguante, moral y eficacia.` : def.description;
+                return h('div', { class: `unit-tile ${locked ? 'locked' : ''}`, title: tip }, [
                   h('div', { class: 'unit-tile-top' }, [h('span', { class: 'unit-tile-icon', text: def.icon }), h('span', { class: 'unit-tile-count', text: `×${s.stock[type]}` })]),
-                  h('div', { class: 'unit-tile-name', text: def.name }),
+                  h('div', { class: 'unit-tile-name' }, [def.name, vet > 0 ? h('span', { class: 'vet-stars', text: ` ${'★'.repeat(vet)}` }) : null]),
                   h('button', {
                     class: 'btn small',
-                    text: `+1 · ${money(def.price)}`,
-                    disabled: s.treasury < def.price,
+                    text: locked ? `🔒 Día ${day}` : `+1 · ${money(def.price)}`,
+                    disabled: locked || s.treasury < def.price,
                     onClick: () => {
                       if (buyUnit(s, type)) this.change();
                     },

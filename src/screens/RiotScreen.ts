@@ -6,6 +6,7 @@ import { CROWD_STAGES } from '../data/crowdStages';
 import { FORCE_GATES } from '../data/forceLevels';
 import type { SpawnId } from '../data/riots';
 import { PROTESTER_KINDS, WEAPON_NAMES } from '../data/protesterKinds';
+import { DEMANDS, type DemandId } from '../data/demands';
 import { UNITS, isRooftop, isVehicle, type UnitType } from '../data/units';
 import { PALACE_ROOF } from '../sim/riot/map';
 import { RtsCamera } from '../input/RtsCamera';
@@ -160,6 +161,8 @@ export class RiotScreen implements Screen {
         this.hud.toast('📣 La multitud se repliega y vuelve a protestar en la plaza', 'good');
       } else if (e.type === 'openFire') {
         this.hud.toast(e.by === 'army' ? '🪖 El ejército abre fuego real' : '☠️ La policía dispara a matar', 'bad');
+      } else if (e.type === 'demand') {
+        this.askDemand(e.id);
       } else if (e.type === 'leaderDown') {
         const how = e.how === 'killed' ? '🕯️ Abatido un líder' : '🕶️ Arrestado un líder';
         this.hud.toast(`${how}: la plaza se desmoraliza (quedan ${e.left})`, 'good');
@@ -345,6 +348,35 @@ export class RiotScreen implements Screen {
     const dist = this.view.camera.position.distanceTo(target);
     if (Math.abs(dist - this.cameraStartDist) > 3) this.tutorialSignal('zoom');
     this.tutorial.update(frameDt);
+  }
+
+  // ─── Exigencias de la multitud ────────────────────────────────────────
+
+  private askDemand(id: DemandId): void {
+    const d = DEMANDS[id];
+    const loop = this.o.loop;
+    const wasPaused = loop.paused;
+    loop.paused = true;
+    audio.play('alarm');
+    const answer = (accept: boolean): void => {
+      this.sim.resolveDemand(accept);
+      loop.paused = wasPaused;
+      this.hud.toast(accept ? '🤝 Cedes: la plaza se calma y parte de la gente se va a casa' : '✊ Te niegas: la multitud se enfurece', accept ? 'good' : 'bad');
+    };
+    showModal(
+      this.o.uiRoot,
+      d.title,
+      [
+        h('p', { text: d.text }),
+        h('p', { class: 'hint', text: `Si cedes: la multitud se calma y una parte se va a casa. Coste: ${d.cost}` }),
+        h('p', { class: 'hint', text: 'Si te niegas: la ira sube de golpe.' }),
+      ],
+      [
+        { label: `✊ ${d.refuse}`, onClick: () => answer(false) },
+        { label: `🤝 ${d.accept}`, primary: true, onClick: () => answer(true) },
+      ],
+      'demand',
+    );
   }
 
   // ─── Ficha del manifestante bajo el ratón ──────────────────────────────

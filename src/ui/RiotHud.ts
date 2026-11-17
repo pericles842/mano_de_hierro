@@ -4,6 +4,8 @@ import { CATEGORY_NAMES, UNITS, VISIBLE_UNITS, isVehicle, type UnitCategory, typ
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { Unit } from '../sim/riot/types';
 import { h } from './dom';
+import { collapsible } from './collapsible';
+import { OBJECTIVES } from '../data/objectives';
 import { icon, setIcon } from './icons';
 
 /** Consecuencias de cada nivel de fuerza, para la ficha. */
@@ -71,6 +73,7 @@ export class RiotHud {
   private readonly planningBox: HTMLElement;
   private readonly planningLabel: HTMLElement;
   private readonly counts: HTMLElement;
+  private readonly objectiveLine: HTMLElement;
   private readonly selected: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly toasts: HTMLElement;
@@ -96,13 +99,14 @@ export class RiotHud {
       h('button', { class: 'btn primary start-btn', onClick: () => handlers.onStartNow() }, [icon('play', 12), '¡Empezar ya!']),
     ]);
     this.counts = h('div', { class: 'riot-counts' });
+    this.objectiveLine = h('div', { class: 'riot-objective' });
     this.selected = h('div', { class: 'selected-info' });
     this.banner = h('div', { class: 'banner' });
     this.toasts = h('div', { class: 'toasts' });
 
     const top = h('div', { class: 'riot-top panel' }, [
       h('div', { class: 'riot-title', text: sim.def.name }),
-      h('div', { class: 'riot-region', text: `${sim.def.region} · Plaza de la Patria, ${cityName}` }),
+      h('div', { class: 'riot-region', text: `${sim.def.region} · Plaza de la Patria, ${cityName}${sim.night ? ' · 🌙 Noche' : ''}${sim.rain ? ' · 🌧️ Lluvia' : ''}` }),
       h('div', { class: 'riot-bars' }, [
         h('div', {}, [h('div', { class: 'hud-label' }, ['Aguanta ', this.timerLabel]), h('div', { class: 'bar' }, [this.timerFill])]),
         h('div', {}, [h('div', { class: 'hud-label' }, ['Palacio ', this.palaceLabel]), h('div', { class: 'bar' }, [this.palaceFill])]),
@@ -111,6 +115,7 @@ export class RiotHud {
       this.phase,
       this.planningBox,
       this.counts,
+      this.objectiveLine,
       sim.troopsReluctant ? h('div', { class: 'warning', text: '⚠ Lealtad baja: tus tropas dispersan con desgana.' }) : null,
     ]);
 
@@ -165,7 +170,10 @@ export class RiotHud {
       const count = h('span', { class: 'unit-count' });
       const el = h('div', { class: 'unit-card' }, [
         h('div', { class: 'unit-icon', text: def.icon }),
-        h('div', { class: 'unit-name', text: def.name }),
+        h('div', { class: 'unit-name' }, [
+          def.name,
+          (sim.veterans[type] ?? 0) > 0 ? h('span', { class: 'vet-stars', text: ` ${'★'.repeat(sim.veterans[type] ?? 0)}` }) : null,
+        ]),
         count,
       ]);
       el.dataset.category = def.category;
@@ -197,6 +205,11 @@ export class RiotHud {
       h('div', { text: 'Cámara: WASD, bordes o botón central · Q/E: rotar · Rueda: zoom · 1-4: fuerza · M: sonido' }),
     ]);
 
+    // Paneles plegables: cada uno queda en un icono para despejar la vista.
+    collapsible(top, { icon: '📋', title: 'información de la protesta', key: 'riot-top' });
+    collapsible(force, { icon: '✊', title: 'nivel de fuerza', key: 'riot-force' });
+    help.classList.add('panel');
+    collapsible(help, { icon: '❓', title: 'controles', key: 'riot-help', collapsed: true });
     this.root = h('div', { class: 'riot-hud' }, [top, force, speed, unitBar, this.selected, help, this.toasts, this.banner]);
     parent.append(this.root);
   }
@@ -276,6 +289,7 @@ export class RiotHud {
     this.moodFill.style.width = `${sim.anger * 100}%`;
     this.moodFill.style.background = stage.color;
     this.planningBox.style.display = sim.planning ? '' : 'none';
+    this.planningBox.classList.toggle('active', sim.planning); // plegado, solo se ve en la preparación
     // En el tutorial la preparación no tiene límite: sin cuenta atrás.
     if (sim.planning) this.planningLabel.textContent = Number.isFinite(sim.planningLeft) ? `${Math.ceil(sim.planningLeft)} s` : '';
     this.phase.textContent = sim.planning
@@ -294,6 +308,14 @@ export class RiotHud {
       ? ` · 🩸 Muertos: ${sim.deaths} · Heridos: ${sim.injuredCount} · Agentes caídos: ${sim.soldiersKilled}`
       : '';
     this.counts.textContent = `Protestando: ${sim.activeCount} · 📣 Líderes: ${sim.leadersLeft} · Dispersados: ${sim.dispersed} · Detenidos: ${sim.arrests} · Por llegar: ${sim.total - sim.spawned}${casualties}`;
+    if (sim.objective) {
+      const o = OBJECTIVES[sim.objective];
+      const st = o.status(sim.objectiveStats);
+      this.objectiveLine.textContent = `${o.icon} Objetivo: ${o.name} · ${st.text} ${st.done ? '✓' : ''} · Premio: ${o.rewardText}`;
+      this.objectiveLine.classList.toggle('done', st.done);
+    }
+    this.objectiveLine.style.display = sim.objective ? '' : 'none';
+
     for (const [type, card] of this.cards) {
       const n = sim.available[type];
       card.count.textContent = `×${n}`;

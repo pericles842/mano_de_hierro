@@ -123,6 +123,61 @@ describe('colectivos paramilitares', () => {
   });
 });
 
+describe('clima', () => {
+  it('la lluvia disipa antes el gas y trae algo menos de gente', () => {
+    const dry = sim();
+    const wet = sim({ weather: { rain: true } });
+    expect(wet.total).toBeLessThan(dry.total);
+    for (const s of [dry, wet]) s.gasClouds.push({ x: 0, z: 0, r: 3, life: 8, maxLife: 8 });
+    run(dry, 4);
+    run(wet, 4);
+    expect(wet.gasClouds.length === 0 || wet.gasClouds[0].life < (dry.gasClouds[0]?.life ?? 0)).toBe(true);
+  });
+
+  it('de noche tus tropas rinden menos', () => {
+    expect(sim({ weather: { night: true } }).night).toBe(true);
+    expect(sim().night).toBe(false);
+  });
+});
+
+describe('exigencias y objetivos', () => {
+  it('a mitad de la protesta llega una exigencia; ceder calma y manda gente a casa', () => {
+    let s: RiotSim | null = null;
+    for (let seed = 1; seed < 30 && !s; seed++) {
+      const t = sim({ seed, unrest: 30 });
+      run(t, 100, () => undefined);
+      if (t.demand) s = t;
+    }
+    expect(s).not.toBeNull();
+    const before = s!.anger;
+    s!.resolveDemand(true);
+    expect(s!.anger).toBeLessThan(before);
+    expect(s!.demand!.accepted).toBe(true);
+  });
+
+  it('negarse enfurece y queda apuntado como causa', () => {
+    const s = sim({ seed: 4 });
+    s.demand = { id: 'pan', accepted: null };
+    const before = s.anger;
+    s.resolveDemand(false);
+    expect(s.anger).toBeGreaterThan(before);
+    expect(s.angerSources.exigencias).toBeGreaterThan(0);
+  });
+
+  it('cada protesta trae un objetivo secundario (el tutorial no)', () => {
+    expect(sim().objective).not.toBeNull();
+    expect(sim({ objectives: false }).objective).toBeNull();
+  });
+
+  it('el informe sabe qué calentó a la multitud', () => {
+    const s = sim({ unrest: 40 });
+    for (let x = -8; x <= 8; x += 2) s.deploy('soldier', x, 14);
+    s.setForce(2);
+    run(s, PREP_TIME + 40);
+    expect(s.angerSources.fuerza).toBeGreaterThan(0);
+  });
+});
+
 describe('líderes', () => {
   it('el número de líderes varía de una protesta a otra', () => {
     const counts = new Set<number>();

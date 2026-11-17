@@ -5,6 +5,9 @@ import type { RiotDef, SpawnId } from '../../data/riots';
 import { UNITS, isRooftop, isVehicle, type UnitDef, type UnitType } from '../../data/units';
 import { upgradeEffects, type UpgradeEffects, type UpgradeId } from '../../data/upgrades';
 import { SpatialGrid } from '../spatialGrid';
+import { DEMAND_LIST, type DemandId } from '../../data/demands';
+import { OBJECTIVES, OBJECTIVE_LIST, type ObjectiveId, type ObjectiveStats } from '../../data/objectives';
+import type { AngerSource } from './types';
 import {
   GOAL_Z,
   PALACE,
@@ -43,6 +46,15 @@ export interface RiotConfig {
   upgrades?: readonly UpgradeId[];
   /** Segundos de preparación antes de empezar (0 = empieza directamente). */
   planning?: number;
+  /** Clima aleatorio de esta protesta. */
+  weather?: { night?: boolean; rain?: boolean };
+  /** Veteranía (0-3) por tipo de tropa: más aguante, más moral y dispersan mejor. */
+  veterans?: Partial<Record<UnitType, number>>;
+  /** Mártires recientes: la multitud llega más furiosa. */
+  martyrs?: number;
+  /** Exigencias a mitad de protesta y objetivo secundario (el tutorial los apaga). */
+  demands?: boolean;
+  objectives?: boolean;
 }
 
 /** Segundos de concentración antes de que arranque la marcha. */
@@ -62,6 +74,8 @@ const PRESS_RADIUS = 8;
 const TANQUETA_MAGNET = 12;
 /** Distancia máxima a la que la infantería sale de su posición a enfrentar a la multitud, por nivel de fuerza. */
 const ENGAGE_LEASH = [0, 6, 10, 16];
+/** Cuánto pesa la represión en la ira (menos de 1: la protesta escala más despacio). */
+const ESCALATION = 0.6;
 /** Francotirador: segundos que tarda en apuntar antes de disparar (con mano dura). */
 const SNIPER_AIM = 7;
 /** Motorizados: los detenidos se entregan en la puerta del palacio. */
@@ -155,6 +169,21 @@ export class RiotSim {
   readonly leaderTotal: number;
   /** Líderes arrestados o abatidos. */
   leadersDown = 0;
+  /** Clima: de noche tus tropas rinden menos; la lluvia disipa el gas y el fuego, y desanima a venir. */
+  readonly night: boolean;
+  readonly rain: boolean;
+  /** Ira aportada por cada causa (informe de "por qué escaló"). */
+  readonly angerSources: Partial<Record<AngerSource, number>> = {};
+  /** Exigencia de la multitud: aparece a mitad de la protesta y el jugador decide. */
+  demand: { id: DemandId; accepted: boolean | null } | null = null;
+  private readonly demandAt: number;
+  private readonly demandId: DemandId;
+  /** Objetivo secundario de esta protesta. */
+  readonly objective: ObjectiveId | null;
+  vehiclesUsed = 0;
+  colectivosUsed = 0;
+  /** Veteranía por tipo de tropa (0-3). */
+  readonly veterans: Partial<Record<UnitType, number>>;
   private nextUnitId = 1;
   private stepCount = 0;
   private sprayingNow = 0;
@@ -163,13 +192,17 @@ export class RiotSim {
   constructor(cfg: RiotConfig) {
     this.def = cfg.def;
     this.rng = new Random(cfg.seed);
-    this.total = Math.round(cfg.def.protesters * cfg.scale);
+    this.night = cfg.def.night === true || cfg.weather?.night === true;
+    this.rain = cfg.weather?.rain === true;
+    // Con lluvia viene algo menos de gente.
+    this.total = Math.round(cfg.def.protesters * cfg.scale * (this.rain ? 0.9 : 1));
     this.duration = cfg.def.duration;
     this.spawnDeadline = this.duration * 0.65;
     this.available = { ...cfg.stock };
     this.planningLeft = cfg.planning ?? 0;
     this.upgrades = cfg.upgrades ?? [];
-    this.anger = initialAnger(cfg.def, cfg.unrest);
+    this.anger = Math.min(1, initialAnger(cfg.def, cfg.unrest) + Math.min(0.15, (cfg.martyrs ?? 0) * 0.03));
+    this.veterans = cfg.veterans ?? {};
     this.angerFloor = cfg.def.aggression * 0.4;
     this.stage = stageForAnger(this.anger);
     this.peakStage = this.stage;
@@ -179,6 +212,11 @@ export class RiotSim {
     this.fx = upgradeEffects(this.upgrades);
     this.surgeAt = PREP_TIME + this.rng.range(10, 50) * (1.15 - this.anger);
     this.leaderTotal = Math.max(1, cfg.def.leaders + this.rng.int(-1, 2));
+    // Sorteos de exigencia y objetivo con su propio generador: no alteran el resto de la simulación.
+    const extras = new Random(cfg.seed * 31 + 7);
+    this.demandId = extras.pick(DEMAND_LIST);
+    this.demandAt = cfg.demands !== false && extras.chance(0.75) ? this.duration * extras.range(0.3, 0.55) : Infinity;
+    this.objective = cfg.objectives !== false ? extras.pick(OBJECTIVE_LIST) : null;
     this.nextWaveSpawn = this.rng.pick(this.def.spawns);
     const windAngle = this.rng.range(0, Math.PI * 2);
     this.wind = { x: Math.cos(windAngle) * 0.45, z: Math.sin(windAngle) * 0.45 };
@@ -234,6 +272,37 @@ export class RiotSim {
     return standing + (this.leaderTotal - this.leadersSpawned);
   }
 
+  /**
+   * Responder a la exigencia. Ceder calma la plaza y una parte se va a casa (el coste para el régimen
+   * se aplica al terminar); negarse enfurece.
+   */
+  resolveDemand(accept: boolean): void {
+    if (!this.demand || this.demand.accepted !== null || this.result) return;
+    this.demand.accepted = accept;
+    if (!accept) {
+      this.addAnger(0.12, 'exigencias');
+      return;
+    }
+    this.anger = Math.max(this.angerFloor * 0.5, this.anger - 0.25);
+    for (const p of this.protesters) {
+      if (!isUpright(p) || p.state === 'fleeing' || p.kind === 'prensa' || !this.rng.chance(0.25)) continue;
+      p.state = 'fleeing';
+      p.fleeTo = nearestExit(p.x, p.z);
+    }
+  }
+
+  /** Datos para comprobar el objetivo secundario. */
+  get objectiveStats(): ObjectiveStats {
+    return {
+      leadersDown: this.leadersDown,
+      deaths: this.deaths,
+      pressIncidents: this.pressIncidents,
+      vehiclesUsed: this.vehiclesUsed,
+      dispersed: this.dispersed,
+      total: this.total,
+    };
+  }
+
   /** Vehículo: aparece en la puerta del palacio y se dirige al centro de la plaza. Solo durante la protesta. */
   dispatchVehicle(type: UnitType): Unit | null {
     if (!isVehicle(type) || this.planning || this.result || this.available[type] <= 0) return null;
@@ -241,7 +310,8 @@ export class RiotSim {
       const unit = this.deploy(type, ox, -19.5, 0);
       if (!unit) continue;
       this.orderMove(unit.id, ox * 0.5, 4);
-      unit.holdTimer = 4; // el helicóptero llega al centro y luego patrulla solo
+      unit.holdTimer = 4;
+      this.vehiclesUsed++;
       return unit;
     }
     return null;
@@ -308,7 +378,8 @@ export class RiotSim {
   deploy(type: UnitType, x: number, z: number, heading = 0): Unit | null {
     if (this.available[type] <= 0 || !this.canPlace(type, x, z)) return null;
     const def = UNITS[type];
-    const integrity = def.integrity * this.fx.integrityMult[type];
+    const vet = this.veterans[type] ?? 0;
+    const integrity = def.integrity * this.fx.integrityMult[type] * (1 + 0.1 * vet);
     const ammo = Math.round((def.ammo ?? 0) * this.fx.ammoMult);
     const unit: Unit = {
       id: this.nextUnitId++,
@@ -351,9 +422,10 @@ export class RiotSim {
     };
     this.available[type]--;
     if (type === 'tanqueta') this.tanquetasDeployed++;
+    if (type === 'colectivo') this.colectivosUsed++;
     if (type === 'army') {
       this.armyDeployed++;
-      this.anger = Math.min(1, this.anger + 0.03); // los soldados en la calle indignan
+      this.addAnger(0.03, 'ejercito'); // los soldados en la calle indignan
       this.notePressIfNear(x, z);
     }
     this.units.push(unit);
@@ -448,6 +520,10 @@ export class RiotSim {
     this.updateAnger(dt);
     this.updateStage();
     this.updatePhase(dt);
+    if (this.demand === null && this.marchStarted && this.elapsed >= this.demandAt) {
+      this.demand = { id: this.demandId, accepted: null };
+      this.events.push({ type: 'demand', id: this.demandId });
+    }
     this.updateCrowdMode(dt);
     this.spawnWaves(dt);
     this.moveUnits(dt);
@@ -468,19 +544,34 @@ export class RiotSim {
     this.checkEnd();
   }
 
+  /**
+   * Sube la ira y apunta la causa. La represión pesa ESCALATION veces: la protesta escala,
+   * pero dando tiempo a jugar los niveles intermedios.
+   */
+  addAnger(amount: number, source: AngerSource): void {
+    if (amount <= 0) return;
+    const scaled = source === 'multitud' ? amount : amount * ESCALATION;
+    const before = this.anger;
+    this.anger = Math.min(1, this.anger + scaled);
+    this.angerSources[source] = (this.angerSources[source] ?? 0) + (this.anger - before);
+  }
+
   /** La ira sube con la represión y con el tamaño de la multitud; baja si solo contienes. */
   private updateAnger(dt: number): void {
-    let rate = FORCE_LEVELS[this.forceLevel].angerPerSec;
-    if (this.forceLevel === 0) rate -= 0.0035 * this.fx.calmMult;
+    this.addAnger(FORCE_LEVELS[this.forceLevel].angerPerSec * dt, 'fuerza');
+    let provoke = 0;
     for (const u of this.units) {
       if (u.refusing > 0) continue;
-      rate += UNITS[u.type].provoke ?? 0;
+      provoke += UNITS[u.type].provoke ?? 0;
     }
-    rate += this.sprayingNow * 0.001;
+    this.addAnger(provoke * dt, 'provocacion');
+    this.addAnger(this.sprayingNow * 0.001 * dt, 'gas');
     // Las protestas van de menos a más: la molestia del país y el tamaño de la multitud calientan el ambiente.
-    if (this.marchStarted) rate += (this.def.aggression * 0.5 + this.anger * 0.3) * 0.004 + Math.min(1, this.activeCount / 250) * 0.0015;
-    const next = this.anger + rate * dt;
-    this.anger = rate < 0 ? Math.max(Math.min(this.anger, this.angerFloor), next) : Math.min(1, next);
+    if (this.marchStarted) {
+      this.addAnger(((this.def.aggression * 0.5 + this.anger * 0.3) * 0.004 + Math.min(1, this.activeCount / 250) * 0.0015) * dt, 'multitud');
+    }
+    // Con contención la multitud se va calmando (sin bajar del suelo de la revuelta).
+    if (this.forceLevel === 0) this.anger = Math.max(Math.min(this.anger, this.angerFloor), this.anger - 0.0035 * this.fx.calmMult * dt);
   }
 
   private updateStage(): void {
@@ -776,7 +867,7 @@ export class RiotSim {
     u.refusing = Math.max(0, u.refusing - dt);
     u.holdTimer = Math.max(0, u.holdTimer - dt);
     if (!UNITS[u.type].infantry) return;
-    if (u.sinceHit > 3) u.morale = Math.min(1, u.morale + 0.1 * dt);
+    if (u.sinceHit > 3) u.morale = Math.min(1, u.morale + (0.1 + 0.05 * (this.veterans[u.type] ?? 0)) * dt);
     if (!u.retreating && u.morale < 0.25) {
       u.retreating = true;
       u.chaseId = null;
@@ -795,7 +886,7 @@ export class RiotSim {
   /** De noche tus tropas rinden menos. */
   private nightFactor(u: Unit): number {
     void u;
-    return this.def.night ? 0.8 : 1;
+    return this.night ? 0.8 : 1;
   }
 
   private unitInteractions(u: Unit, dt: number): void {
@@ -804,7 +895,7 @@ export class RiotSim {
     const force = FORCE_LEVELS[this.forceLevel];
     const resist = 1 - this.anger * 0.5;
     const canAct = this.active(u);
-    const melee = (u.type === 'soldier' ? this.fx.meleeMult : 1) * this.nightFactor(u);
+    const melee = (u.type === 'soldier' ? this.fx.meleeMult : 1) * this.nightFactor(u) * (1 + 0.06 * (this.veterans[u.type] ?? 0));
     const charging = u.chargeTo !== null;
     const intimidates = canAct && this.forceLevel >= FORCE_GATES.gas && (u.type === 'soldier' || u.type === 'shield' || u.type === 'capture');
     const [ax, az] = segmentAxis(u, def);
@@ -897,7 +988,7 @@ export class RiotSim {
     }
 
     if (contacts > 0 && this.forceLevel > 0 && this.rng.chance(dt * 2.5)) {
-      this.anger = Math.min(1, this.anger + 0.002 * this.forceLevel * (u.type === 'soldier' ? this.fx.meleeMult : 1));
+      this.addAnger(0.002 * this.forceLevel * (u.type === 'soldier' ? this.fx.meleeMult : 1), 'palizas');
       const ix = u.x + Math.sin(u.heading) * 1.2;
       const iz = u.z + Math.cos(u.heading) * 1.2;
       this.events.push({ type: 'impact', x: ix, z: iz, level: this.forceLevel });
@@ -1037,7 +1128,7 @@ export class RiotSim {
       const temper = 0.5 + ((p.id * 37) % 11) / 10; // de 0,5 a 1,5: unos se asustan más que otros
       p.resolve -= pr.strength * mult * resist * temper * dt;
     }
-    if (annoyed > 0) this.anger = Math.min(1, this.anger + pr.strength * 0.004 * Math.min(annoyed, 8) * mult * dt);
+    if (annoyed > 0) this.addAnger(pr.strength * 0.004 * Math.min(annoyed, 8) * mult * dt, 'provocacion');
   }
 
   /**
@@ -1115,7 +1206,7 @@ export class RiotSim {
       const temper = 0.5 + ((q.id * 37) % 11) / 10;
       q.resolve -= q.maxResolve * (near ? strength * temper : 0.04);
     }
-    this.anger = Math.min(1, this.anger + 0.01 + Math.min(angry, 10) * 0.002);
+    this.addAnger(0.01 + Math.min(angry, 10) * 0.002, 'disparos');
   }
 
   /**
@@ -1196,7 +1287,7 @@ export class RiotSim {
     u.beatId = target.id;
     u.beatTimer = BEAT_TIME;
     u.cooldown += BEAT_TIME;
-    this.anger = Math.min(1, this.anger + 0.006);
+    this.addAnger(0.006, 'palizas');
     this.harshness += 0.4;
     this.notePressIfNear(target.x, target.z);
   }
@@ -1274,7 +1365,7 @@ export class RiotSim {
     this.deaths++;
     this.events.push({ type: 'killed', x: p.x, z: p.z, kind: p.kind });
     // Terror alrededor... y furia en toda la plaza.
-    this.anger = Math.min(1, this.anger + 0.025);
+    this.addAnger(0.025, 'muertes');
     this.grid.query(p.x, p.z, 6, this.near2);
     for (const i of this.near2) {
       const q = this.protesters[i];
@@ -1282,7 +1373,7 @@ export class RiotSim {
     }
     if (p.kind === 'lider') {
       this.leadersKilled++;
-      this.anger = Math.min(1, this.anger + 0.05);
+      this.addAnger(0.05, 'muertes');
       this.events.push({ type: 'martyr', x: p.x, z: p.z });
       this.leaderDown(p, 'killed');
     }
@@ -1369,7 +1460,7 @@ export class RiotSim {
     this.gasClouds.push({ x, z, r, life, maxLife: life });
     this.events.push({ type: 'gas', fromX, fromZ, toX: x, toZ: z });
     this.harshness += 1;
-    this.anger = Math.min(1, this.anger + 0.01);
+    this.addAnger(0.01, 'gas');
     this.notePressIfNear(x, z);
   }
 
@@ -1389,7 +1480,7 @@ export class RiotSim {
       if (p === target || !isUpright(p) || p.state === 'fleeing') continue;
       if (Math.hypot(p.x - target.x, p.z - target.z) <= 1.6) p.resolve -= p.kind === 'escudero' ? 0.08 : 0.2;
     }
-    this.anger = Math.min(1, this.anger + 0.004);
+    this.addAnger(0.004, 'perdigones');
     this.harshness += 0.3;
     this.events.push({ type: 'shot', fromX: u.x, fromZ: u.z, toX: target.x, toZ: target.z, injured });
     this.notePressIfNear(target.x, target.z);
@@ -1427,7 +1518,7 @@ export class RiotSim {
           u.carryId = null;
           u.cooldown = 2.5;
           this.arrests++;
-          this.anger = Math.min(1, this.anger + 0.015);
+          this.addAnger(0.015, 'arrestos');
           this.events.push({ type: 'arrest', x: p.x, z: p.z });
           this.notePressIfNear(p.x, p.z);
           if (p.kind === 'lider') this.leaderDown(p, 'arrest');
@@ -1502,7 +1593,7 @@ export class RiotSim {
       if (Math.hypot(leader.x - u.x, leader.z - u.z) < 1.4) {
         leader.state = 'gone';
         this.arrests++;
-        this.anger = Math.min(1, this.anger + (leader.kind === 'lider' ? 0.02 : 0.01));
+        this.addAnger(leader.kind === 'lider' ? 0.02 : 0.01, 'arrestos');
         this.events.push({ type: 'arrest', x: leader.x, z: leader.z });
         this.notePressIfNear(leader.x, leader.z);
         // Los de alrededor se desaniman; si era un líder, toda la plaza.
@@ -1594,7 +1685,7 @@ export class RiotSim {
     const resist = 1 - this.anger * 0.5;
     for (let c = this.gasClouds.length - 1; c >= 0; c--) {
       const g = this.gasClouds[c];
-      g.life -= dt;
+      g.life -= dt * (this.rain ? 1.5 : 1); // la lluvia lava el gas
       if (g.life <= 0) {
         this.gasClouds.splice(c, 1);
         continue;
@@ -1624,7 +1715,7 @@ export class RiotSim {
   private updateFires(dt: number): void {
     for (let i = this.fires.length - 1; i >= 0; i--) {
       const f = this.fires[i];
-      f.life -= dt;
+      f.life -= dt * (this.rain ? 2 : 1); // y apaga el fuego
       if (f.life <= 0) {
         this.fires.splice(i, 1);
         continue;
@@ -1763,6 +1854,7 @@ export class RiotSim {
 
   private maybeBurnTire(p: Protester, dt: number): void {
     if (!this.def.burnsTires || p.kind !== 'radical' || this.stage < 1 || p.state !== 'advancing') return;
+    if (this.rain && this.rng.chance(0.5)) return; // con lluvia cuesta prender cauchos
     if (this.fires.filter((f) => f.kind === 'tire').length >= 8 || !this.rng.chance(dt * 0.025 * this.stage)) return;
     if (p.z > 30 || p.z < -12) return;
     this.fires.push({ kind: 'tire', x: p.x, z: p.z, r: 1.6, life: 12 });
@@ -1821,6 +1913,17 @@ export class RiotSim {
       won,
       reason,
       total: this.total,
+      angerSources: { ...this.angerSources },
+      objective: this.objective ?? undefined,
+      objectiveDone: this.objective !== null && won && OBJECTIVES[this.objective].status(this.objectiveStats).done,
+      demand: this.demand ? { ...this.demand } : undefined,
+      leadersDown: this.leadersDown,
+      vehiclesUsed: this.vehiclesUsed,
+      colectivosUsed: this.colectivosUsed,
+      survivors: this.units.reduce<Partial<Record<UnitType, number>>>((acc, u) => {
+        acc[u.type] = (acc[u.type] ?? 0) + 1;
+        return acc;
+      }, {}),
       dispersed: this.dispersed + fleeing,
       elapsed: this.elapsed,
       avgForce: this.forceIntegral / Math.max(this.elapsed, 1),

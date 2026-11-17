@@ -17,6 +17,7 @@ import {
 import { VoxelParticles } from './particles';
 import { buildRiotEnvironment, type RiotEnvironment } from './riotEnvironment';
 import { SoundWaves } from './soundWaves';
+import { RainFx } from './rain';
 import { FORCE_GATES } from '../data/forceLevels';
 
 /** Las marcas de manifestantes comparten temporizadores con las tropas: desplazar sus ids. */
@@ -27,6 +28,7 @@ const HELI_ALTITUDE = 9;
 /** Altura de la azotea del palacio (francotiradores). */
 const ROOF_Y = 7.5;
 const NIGHT_SKY = 0x0d1224;
+const RAIN_SKY = 0x93a4b5;
 const FLAME_COLORS = [0xff6a00, 0xffb300, 0xff3d00, 0xffd54a];
 
 export interface GhostPlacement {
@@ -89,6 +91,7 @@ export class RiotView {
   private fireAccumulator = 0;
   private time = 0;
   private frameSimDt = 0;
+  private readonly rain: RainFx | null = null;
   /** Ondas rojas: megáfono del negociador y agentes repeliendo. */
   private readonly waves = new SoundWaves(this.particles);
   private readonly dummy = new THREE.Object3D();
@@ -96,15 +99,20 @@ export class RiotView {
   private readonly shade = new THREE.Color();
 
   constructor(private readonly sim: RiotSim) {
-    const night = sim.def.night === true;
-    const sky = night ? NIGHT_SKY : SKY;
+    const night = sim.night;
+    // Con lluvia el cielo se agrisa un poco y la niebla se acerca (sin tapar la plaza).
+    const sky = night ? NIGHT_SKY : sim.rain ? RAIN_SKY : SKY;
     this.scene.background = new THREE.Color(sky);
-    this.scene.fog = new THREE.Fog(sky, night ? 70 : 110, night ? 170 : 230);
+    this.scene.fog = new THREE.Fog(sky, night ? 70 : sim.rain ? 95 : 110, night ? 170 : sim.rain ? 210 : 230);
+    if (sim.rain) {
+      this.rain = new RainFx(sim.wind);
+      this.scene.add(this.rain.mesh);
+    }
     this.camera.position.set(0, 46, 60);
     this.camera.lookAt(0, 0, 9);
 
-    this.scene.add(night ? new THREE.HemisphereLight(0x5a6bc4, 0x15151f, 0.55) : new THREE.HemisphereLight(0xe8f1ff, 0x7a6a55, 1.7));
-    const sun = night ? new THREE.DirectionalLight(0x9fb4ff, 0.7) : new THREE.DirectionalLight(0xfff0d9, 2.4);
+    this.scene.add(night ? new THREE.HemisphereLight(0x5a6bc4, 0x15151f, 0.55) : new THREE.HemisphereLight(0xe8f1ff, 0x7a6a55, sim.rain ? 1.45 : 1.7));
+    const sun = night ? new THREE.DirectionalLight(0x9fb4ff, 0.7) : new THREE.DirectionalLight(0xfff0d9, sim.rain ? 1.6 : 2.4);
     if (night) {
       // Apagón: el palacio es el único edificio iluminado de la ciudad.
       for (const x of [-7, 7]) {
@@ -340,6 +348,7 @@ export class RiotView {
     this.gasParticles(simDt);
     this.particles.update(simDt);
     this.gasFx.update(simDt);
+    this.rain?.update(simDt);
     renderer.render(this.scene, this.camera);
   }
 
@@ -615,6 +624,7 @@ export class RiotView {
     this.env.dispose();
     this.particles.dispose();
     this.gasFx.dispose();
+    this.rain?.dispose();
     this.aimGeometry.dispose();
     this.aimMaterial.dispose();
     this.hiddenMaterial.dispose();
