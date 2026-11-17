@@ -1,6 +1,7 @@
 import type { CrowdStage } from '../../data/crowdStages';
 import type { SpawnId } from '../../data/riots';
 import type { UnitType } from '../../data/units';
+import type { GadgetId } from '../../data/gadgets';
 
 export type ProtesterKind = 'pacifico' | 'radical' | 'lider' | 'escudero' | 'prensa' | 'medico';
 /** 'injured': en el suelo un rato (los médicos pueden levantarlo). 'dead': cuerpo caído, se queda en la plaza. */
@@ -40,6 +41,8 @@ export interface Protester {
   marked: number;
   /** Perseguido por motorizados: los médicos no pueden recuperarlo. */
   chased: boolean;
+  /** Segundos que queda paralizado por una granada aturdidora. */
+  stunned: number;
 }
 
 export interface Unit {
@@ -82,6 +85,17 @@ export interface Unit {
   homeX: number;
   homeZ: number;
   sprayTarget: { x: number; z: number } | null;
+  /** Negociador hablando por el megáfono a alguien (solo para la vista). */
+  talking: boolean;
+  /** Infantería repeliendo manifestantes en este paso (solo para la vista). */
+  pushing: boolean;
+  /** Motorizados: manifestante que van arrastrando fuera de la plaza. */
+  carryId: number | null;
+  /** Helicóptero: segundos que obedece la orden del jugador antes de volver a patrullar. */
+  holdTimer: number;
+  /** Paliza en curso: a quién tiene agarrado y cuánto le queda. */
+  beatId: number | null;
+  beatTimer: number;
 }
 
 export interface UnitBody {
@@ -139,7 +153,14 @@ export type RiotEvent =
   | { type: 'regroup' }
   | { type: 'palaceFallen' }
   | { type: 'wave'; spawn: SpawnId; count: number }
-  | { type: 'marchStart' };
+  | { type: 'marchStart' }
+  | { type: 'planningEnd' }
+  | { type: 'beating'; x: number; z: number }
+  | { type: 'bite'; x: number; z: number }
+  | { type: 'pepper'; fromX: number; fromZ: number; toX: number; toZ: number }
+  | { type: 'flash'; fromX: number; fromZ: number; toX: number; toZ: number }
+  | { type: 'jam' }
+  | { type: 'leaderDown'; x: number; z: number; how: 'arrest' | 'killed'; left: number };
 
 export interface RiotResult {
   /** Ganas si el palacio resiste hasta el final. Si llega a 0, pierdes la protesta (y puedes reintentarla). */
@@ -172,4 +193,6 @@ export interface RiotResult {
   soldiersKilled: number;
   /** Segundos-tanqueta en la plaza (cuestan presión internacional). */
   tanquetaSeconds: number;
+  /** Usos de cada gadget en esta protesta (para descontar las cargas pagadas). */
+  gadgetsUsed?: Partial<Record<GadgetId, number>>;
 }

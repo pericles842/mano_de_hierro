@@ -3,15 +3,21 @@ import { audio } from '../audio/AudioEngine';
 import type { GameLoop } from '../core/GameLoop';
 import type { Screen } from '../core/Screen';
 import { CROWD_STAGES } from '../data/crowdStages';
+import { FORCE_GATES } from '../data/forceLevels';
 import type { SpawnId } from '../data/riots';
-import { UNITS, type UnitType } from '../data/units';
+import { PROTESTER_KINDS, WEAPON_NAMES } from '../data/protesterKinds';
+import { UNITS, isRooftop, isVehicle, type UnitType } from '../data/units';
+import { PALACE_ROOF } from '../sim/riot/map';
+import { GADGETS, GADGET_ORDER, type GadgetId } from '../data/gadgets';
 import { RtsCamera } from '../input/RtsCamera';
 import { riotHeadline, type NewsFeed } from '../news/NewsFeed';
 import { RiotView, type GhostPlacement } from '../render/RiotView';
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { RiotResult, Unit } from '../sim/riot/types';
 import { RiotHud } from '../ui/RiotHud';
+import { Tutorial, type TutorialSignal } from '../ui/Tutorial';
 import { h } from '../ui/dom';
+import { icon } from '../ui/icons';
 import { showModal } from '../ui/modals';
 
 export interface RiotScreenOptions {
@@ -22,6 +28,8 @@ export interface RiotScreenOptions {
   cityName: string;
   news: NewsFeed;
   devMode: boolean;
+  /** Muestra el tutorial paso a paso (primera partida). */
+  tutorial?: boolean;
   /** Cambia el modo developer y devuelve si quedó activo. */
   onDevToggle(): boolean;
   onFinished(result: RiotResult): void;
@@ -45,9 +53,14 @@ export class RiotScreen implements Screen {
   private readonly canvas: HTMLCanvasElement;
   private readonly cursorTip: HTMLElement;
   private readonly selectBox: HTMLElement;
+  /** Ficha del manifestante bajo el ratón (clase, arma y ánimo). */
+  private readonly crowdTip: HTMLElement;
+  private crowdTipId = -1;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  /** Plano de la azotea del palacio: los francotiradores se apuntan ahí. */
+  private readonly roof = new THREE.Plane(new THREE.Vector3(0, 1, 0), -PALACE_ROOF.y);
   private readonly hit = new THREE.Vector3();
   private readonly forward = new THREE.Vector3();
   private readonly projected = new THREE.Vector3();
@@ -66,6 +79,15 @@ export class RiotScreen implements Screen {
   private finishTimer = -1;
   private done = false;
   private hudTimer = 0;
+  /** Barricada que se está recolocando (sigue al ratón hasta el clic). */
+  private movingId: number | null = null;
+  private moveHeading = 0;
+  /** Iconos flotantes (mover / quitar) sobre cada barricada seleccionada. */
+  private readonly barricadeTools = new Map<number, HTMLElement>();
+  private readonly tutorial: Tutorial | null = null;
+  /** Posición y distancia iniciales de la cámara (el tutorial detecta si la movió). */
+  private readonly cameraStart = new THREE.Vector3();
+  private cameraStartDist = 0;
 
   constructor(private readonly o: RiotScreenOptions) {
     this.sim = o.sim;
@@ -83,6 +105,12 @@ export class RiotScreen implements Screen {
         o.loop.paused = !o.loop.paused;
       },
       onMute: () => audio.toggleMute(),
+      onForceHover: () => this.tutorialSignal('force'),
+      onGadget: (id) => this.triggerGadget(id),
+      onStartNow: () => {
+        this.sim.startNow();
+        o.loop.paused = false;
+      },
       onDev: () => {
         const on = o.onDevToggle();
         if (on) {
@@ -95,7 +123,11 @@ export class RiotScreen implements Screen {
     this.hud.setDev(o.devMode);
     this.cursorTip = h('div', { class: 'cursor-tip', style: 'display:none' });
     this.selectBox = h('div', { class: 'select-box', style: 'display:none' });
-    o.uiRoot.append(this.cursorTip, this.selectBox);
+    this.crowdTip = h('div', { class: 'crowd-tip', style: 'display:none' });
+    o.uiRoot.append(this.cursorTip, this.selectBox, this.crowdTip);
+    if (o.tutorial) this.tutorial = new Tutorial(o.uiRoot, o.sim);
+    this.cameraStart.copy(this.camera.controls.target);
+    this.cameraStartDist = this.view.camera.position.distanceTo(this.camera.controls.target);
 
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('dblclick', this.onDoubleClick);
@@ -130,8 +162,11 @@ export class RiotScreen implements Screen {
         this.hud.toast('📣 La multitud se repliega y vuelve a protestar en la plaza', 'good');
       } else if (e.type === 'openFire') {
         this.hud.toast(e.by === 'army' ? '🪖 El ejército abre fuego real' : '☠️ La policía dispara a matar', 'bad');
-      } else if (e.type === 'martyr') {
-        this.hud.toast('🕯️ Han matado a un líder: la multitud enloquece', 'bad');
+      } else if (e.type === 'leaderDown') {
+        const how = e.how === 'killed' ? '🕯️ Abatido un líder' : '🕶️ Arrestado un líder';
+        this.hud.toast(`${how}: la plaza se desmoraliza (quedan ${e.left})`, 'good');
+      } else if (e.type === 'jam') {
+        this.hud.toast('📵 Comunicaciones cortadas: llegará menos gente y la prensa no transmite', 'neutral');
       } else if (e.type === 'soldierDown') {
         this.hud.toast(`🩸 ${UNITS[e.unitType].name}: agentes caídos`, 'bad');
       }
@@ -141,6 +176,9 @@ export class RiotScreen implements Screen {
           e.up ? `${s.icon} ¡La protesta se vuelve ${s.name.toLowerCase()}!` : `${s.icon} La multitud se calma: ${s.name}`,
           e.up ? 'bad' : 'good',
         );
+      } else if (e.type === 'planningEnd') {
+        this.tutorialSignal('start');
+        this.hud.toast(this.sim.fencesUnlocked ? '📢 ¡Empieza la protesta!' : '📢 ¡Empieza la protesta! Las barricadas ya no se pueden mover', 'bad');
       } else if (e.type === 'marchStart') {
         this.hud.toast('📢 ¡Arranca la marcha!', 'bad');
       } else if (e.type === 'wave') {
@@ -162,6 +200,10 @@ export class RiotScreen implements Screen {
     this.camera.update(frameDt);
     this.pruneSelection();
     this.updatePreview();
+    this.updateMovePreview();
+    this.updateBarricadeTools();
+    this.updateTutorial(frameDt);
+    this.updateCrowdTip();
     this.view.render(this.o.renderer, alpha, simDt, this.selected);
     audio.updateCrowd(simDt, {
       active: this.sim.activeCount,
@@ -200,6 +242,21 @@ export class RiotScreen implements Screen {
       return;
     }
     if (this.sim.available[type] <= 0) return;
+    // Los vehículos no se colocan: salen por la puerta del palacio y van al centro.
+    if (isVehicle(type)) {
+      this.disarm();
+      if (this.sim.planning) {
+        this.hud.toast(`🚪 ${UNITS[type].name}: los vehículos salen del palacio cuando empiece la protesta`, 'neutral');
+        audio.play('cancel');
+      } else if (this.sim.dispatchVehicle(type)) {
+        this.hud.toast(`🚪 ${UNITS[type].icon} ${UNITS[type].name} sale del palacio`, 'neutral');
+        audio.play('place');
+      } else {
+        audio.play('cancel');
+      }
+      return;
+    }
+    this.cancelMove();
     this.placeType = type;
     this.selected.clear();
     this.hud.setArmed(type);
@@ -217,7 +274,8 @@ export class RiotScreen implements Screen {
   private placements(): { list: GhostPlacement[]; heading: number } | null {
     const type = this.placeType;
     if (!type || !this.mouse || !this.overCanvas(this.mouse)) return null;
-    const p = this.groundPoint(this.mouse);
+    const onRoof = isRooftop(type);
+    const p = this.groundPoint(this.mouse, onRoof);
     if (!p) return null;
 
     // La hilera va a lo ancho de la pantalla y las tropas miran hacia la cámara (hacia la multitud).
@@ -238,7 +296,7 @@ export class RiotScreen implements Screen {
       const offset = (i - (n - 1) / 2) * spacing;
       const x = p.x + rightX * offset;
       const z = p.z + rightZ * offset;
-      list.push({ x, z, valid: this.sim.canDeploy(type, x, z) });
+      list.push({ x, z, valid: this.sim.canDeploy(type, x, z), y: onRoof ? PALACE_ROOF.y : undefined });
     }
     return { list, heading };
   }
@@ -272,7 +330,211 @@ export class RiotScreen implements Screen {
       return;
     }
     audio.play('place');
+    this.tutorialSignal('deploy');
+    if (placed >= 2) this.tutorialSignal('row');
+    if (type === 'barricade') this.tutorialSignal('barricade');
     if (this.sim.available[type] <= 0) this.disarm();
+  }
+
+  // ─── Tutorial ─────────────────────────────────────────────────────────
+
+  private tutorialSignal(s: TutorialSignal): void {
+    this.tutorial?.signal(s);
+  }
+
+  private updateTutorial(frameDt: number): void {
+    if (!this.tutorial) return;
+    const target = this.camera.controls.target;
+    if (target.distanceTo(this.cameraStart) > 4) this.tutorialSignal('camera');
+    const dist = this.view.camera.position.distanceTo(target);
+    if (Math.abs(dist - this.cameraStartDist) > 3) this.tutorialSignal('zoom');
+    this.tutorial.update(frameDt);
+  }
+
+  // ─── Gadgets ──────────────────────────────────────────────────────────
+
+  private triggerGadget(id: GadgetId): void {
+    const g = GADGETS[id];
+    if (this.sim.gadgetUses[id] <= 0) {
+      this.hud.toast(`${g.icon} ${g.name}: sin usos (compra cargas en el despacho)`, 'neutral');
+      audio.play('cancel');
+      return;
+    }
+    if (this.sim.planning) {
+      this.hud.toast(`${g.icon} ${g.name}: espera a que empiece la protesta`, 'neutral');
+      audio.play('cancel');
+      return;
+    }
+    if (!this.sim.useGadget(id)) {
+      this.hud.toast(`${g.icon} ${g.name}: ningún agente puede usarlo ahora`, 'neutral');
+      audio.play('cancel');
+      return;
+    }
+    if (id !== 'inhibidor') this.hud.toast(`${g.icon} ${g.name}: ¡ahora!`, 'neutral');
+  }
+
+  // ─── Ficha del manifestante bajo el ratón ──────────────────────────────
+
+  private updateCrowdTip(): void {
+    const hide = (): void => {
+      this.crowdTip.style.display = 'none';
+      this.crowdTipId = -1;
+    };
+    const m = this.mouse;
+    if (!m || this.placeType || this.movingId !== null || this.dragStart || !this.overCanvas(m) || this.unitAt(m)) return hide();
+    const g = this.groundPoint(m);
+    if (!g) return hide();
+    let p = null;
+    let bestD = 0.9;
+    for (const q of this.sim.protesters) {
+      if (q.state === 'gone' || q.state === 'dead') continue;
+      const d = Math.hypot(q.x - g.x, q.z - g.z);
+      if (d < bestD) {
+        bestD = d;
+        p = q;
+      }
+    }
+    if (!p) return hide();
+    if (p.id !== this.crowdTipId) {
+      this.crowdTipId = p.id;
+      const kind = PROTESTER_KINDS[p.kind];
+      const tags = [
+        WEAPON_NAMES[p.weapon],
+        p.masked ? '🎭 Encapuchado' : '',
+        p.state === 'fleeing' ? '🏃 Huyendo' : p.state === 'injured' ? '🤕 Herido' : p.state === 'occupying' ? '🏛️ En el palacio' : '',
+        p.marked > 0 ? '🎯 Marcado' : '',
+      ].filter(Boolean);
+      const fill = h('span');
+      fill.dataset.role = 'resolve';
+      this.crowdTip.replaceChildren(
+        h('div', { class: 'crowd-tip-head' }, [h('span', { class: 'crowd-tip-icon', text: kind.icon }), h('strong', { text: kind.name })]),
+        h('div', { class: 'crowd-tip-desc', text: kind.description }),
+        h('div', { class: 'unit-stat' }, [h('span', { class: 'unit-stat-label', text: 'Ánimo' }), h('span', { class: 'unit-stat-bar' }, [fill])]),
+      );
+      if (tags.length) this.crowdTip.insertBefore(h('div', { class: 'crowd-tip-tags', text: tags.join(' · ') }), this.crowdTip.lastChild);
+    }
+    const fill = this.crowdTip.querySelector<HTMLElement>('[data-role="resolve"]');
+    if (fill) fill.style.width = `${Math.round(Math.max(0, p.resolve / p.maxResolve) * 100)}%`;
+    this.crowdTip.style.display = '';
+    this.crowdTip.style.transform = `translate(${m.x + 16}px, ${m.y + 18}px)`;
+  }
+
+  // ─── Barricadas: mover y quitar ───────────────────────────────────────
+
+  /** Posiciona sobre cada barricada seleccionada sus botones ✋ mover / 🗑️ quitar. */
+  private updateBarricadeTools(): void {
+    const show = !this.placeType && this.movingId === null && !this.sim.result;
+    const wanted = new Set<number>();
+    if (show) for (const id of this.selected) if (this.sim.isRelocatable(id)) wanted.add(id);
+
+    for (const [id, el] of this.barricadeTools) {
+      if (!wanted.has(id)) {
+        el.remove();
+        this.barricadeTools.delete(id);
+      }
+    }
+    if (wanted.size === 0) return;
+    const rect = this.canvas.getBoundingClientRect();
+    for (const id of wanted) {
+      const unit = this.sim.units.find((u) => u.id === id);
+      if (!unit) continue;
+      let el = this.barricadeTools.get(id);
+      if (!el) {
+        el = this.makeBarricadeTools(id);
+        this.barricadeTools.set(id, el);
+        this.o.uiRoot.append(el);
+      }
+      this.projected.set(unit.x, 2.2, unit.z).project(this.view.camera);
+      const sx = rect.left + ((this.projected.x + 1) / 2) * rect.width;
+      const sy = rect.top + ((1 - this.projected.y) / 2) * rect.height;
+      el.style.display = this.projected.z > 1 ? 'none' : '';
+      el.style.transform = `translate(${sx}px, ${sy}px) translate(-50%, -100%)`;
+    }
+  }
+
+  private makeBarricadeTools(id: number): HTMLElement {
+    const button = (name: 'move' | 'trash', title: string, action: () => void, tone = ''): HTMLElement => {
+      const b = h('button', { class: `barricade-tool ${tone}`, title }, [icon(name, 16)]);
+      b.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        if (e.button === 0) action();
+      });
+      return b;
+    };
+    return h('div', { class: 'barricade-tools' }, [
+      button('move', 'Mover barricada (clic en el destino · R: girar · clic derecho: cancelar)', () => this.startMove(id)),
+      button('trash', 'Quitar barricada (vuelve a tu reserva) · tecla Supr', () => this.removeBarricades([id]), 'danger'),
+    ]);
+  }
+
+  private startMove(id: number): void {
+    const unit = this.sim.units.find((u) => u.id === id);
+    if (!unit || !this.sim.isRelocatable(id)) return;
+    this.disarm();
+    this.movingId = id;
+    this.moveHeading = unit.heading;
+    audio.play('click');
+  }
+
+  private cancelMove(): void {
+    if (this.movingId === null) return;
+    this.movingId = null;
+    this.view.setGhosts(null);
+    this.cursorTip.style.display = 'none';
+  }
+
+  private movingTarget(): { x: number; z: number; valid: boolean } | null {
+    const id = this.movingId;
+    const unit = id === null ? undefined : this.sim.units.find((u) => u.id === id);
+    if (id === null || !unit || !this.mouse || !this.overCanvas(this.mouse)) return null;
+    const p = this.groundPoint(this.mouse);
+    if (!p) return null;
+    return { x: p.x, z: p.z, valid: this.sim.canPlace(unit.type, p.x, p.z, id) };
+  }
+
+  private updateMovePreview(): void {
+    if (this.movingId === null) return;
+    const unit = this.sim.units.find((u) => u.id === this.movingId);
+    if (!unit || !this.sim.isRelocatable(unit.id)) {
+      this.cancelMove(); // la destruyeron mientras la movías
+      return;
+    }
+    const target = this.movingTarget();
+    this.view.setGhosts(unit.type, target ? [target] : [], this.moveHeading);
+    if (!target || !this.mouse) {
+      this.cursorTip.style.display = 'none';
+      return;
+    }
+    this.cursorTip.replaceChildren(icon('move', 13), ` Mover ${UNITS[unit.type].name.toLowerCase()} · R: girar · clic derecho: cancelar`);
+    this.cursorTip.style.display = '';
+    this.cursorTip.style.transform = `translate(${this.mouse.x + 16}px, ${this.mouse.y + 18}px)`;
+  }
+
+  private finishMove(): void {
+    const id = this.movingId;
+    const target = this.movingTarget();
+    if (id === null || !target) return;
+    if (!target.valid || !this.sim.relocate(id, target.x, target.z, this.moveHeading)) {
+      audio.play('cancel');
+      return;
+    }
+    audio.play('place');
+    this.tutorialSignal('barricadeEdit');
+    this.cancelMove();
+  }
+
+  private removeBarricades(ids: Iterable<number>): void {
+    let removed = 0;
+    for (const id of [...ids]) {
+      if (this.sim.dismantle(id)) {
+        this.selected.delete(id);
+        removed++;
+      }
+    }
+    if (removed === 0) return;
+    this.tutorialSignal('barricadeEdit');
+    audio.play('cancel');
+    this.hud.toast(removed > 1 ? `🚧 ${removed} barricadas retiradas: vuelven a tu reserva` : '🚧 Barricada retirada: vuelve a tu reserva', 'neutral');
   }
 
   // ─── Selección y órdenes ──────────────────────────────────────────────
@@ -329,6 +591,7 @@ export class RiotScreen implements Screen {
     const pick = movable.length > 0 ? movable : inside;
     if (!additive) this.selected.clear();
     for (const u of pick) this.selected.add(u.id);
+    if (movable.length > 0) this.tutorialSignal('select');
   }
 
   /**
@@ -349,7 +612,7 @@ export class RiotScreen implements Screen {
       '⚠️ Orden de fuego real',
       [
         h('p', {
-          text: 'Vas a ordenar «Mano dura». Los antidisturbios dispararán munición letal (escopetas y, si tienes armamento pesado, fusiles AK). El ejército, si está en la calle, también disparará a matar.',
+          text: 'Vas a ordenar «Mano dura». Toda la policía sacará la pistola y las escopetas cargarán munición letal. El ejército, si está en la calle, también disparará a matar.',
         }),
         h('p', {
           text: 'Habrá muertos y heridos. Los derechos humanos quedan suspendidos: la presión internacional, la molestia social y el riesgo de deserciones y golpe de Estado se dispararán. Cada muerte cerca de la prensa dará la vuelta al mundo.',
@@ -380,6 +643,10 @@ export class RiotScreen implements Screen {
   /** Tecla F: los camiones lanzagás seleccionados disparan su próxima salva donde está el ratón. */
   private gasTruckAbility(): void {
     if (!this.mouse) return;
+    if (this.sim.forceLevel < FORCE_GATES.gas && this.selectedUnits().some((u) => u.type === 'gastruck')) {
+      this.hud.toast('🚚 El gas necesita «Contención agresiva» (tecla 2)', 'neutral');
+      return;
+    }
     const p = this.groundPoint(this.mouse);
     if (!p) return;
     let ordered = 0;
@@ -394,12 +661,12 @@ export class RiotScreen implements Screen {
   private moveSelection(screen: Point): void {
     const p = this.groundPoint(screen);
     if (!p) return;
-    // Clic derecho sobre un líder con equipos de captura seleccionados: arrestarlo.
+    // Clic derecho sobre un manifestante con equipos de captura seleccionados: arrestarlo.
     const captures = this.selectedUnits().filter((u) => u.type === 'capture');
-    const leader = captures.length > 0 ? this.sim.leaderAt(p.x, p.z, 2) : null;
+    const leader = captures.length > 0 ? this.sim.protesterAt(p.x, p.z, 1.5, (q) => q.kind !== 'prensa') : null;
     if (leader) {
       for (const u of captures) this.sim.orderCapture(u.id, leader.id);
-      this.hud.toast('🕶️ Equipo de captura: a por el líder', 'neutral');
+      this.hud.toast(`🕶️ Equipo de captura: a por ${leader.kind === 'lider' ? 'el líder' : 'él'}`, 'neutral');
       audio.play('click');
       return;
     }
@@ -410,6 +677,7 @@ export class RiotScreen implements Screen {
     for (const u of units) this.sim.orderMove(u.id, p.x + (u.x - cx), p.z + (u.z - cz));
     this.view.showMoveMarker(p.x, p.z);
     audio.play('click');
+    this.tutorialSignal('move');
   }
 
   // ─── Entrada ───────────────────────────────────────────────────────────
@@ -418,11 +686,12 @@ export class RiotScreen implements Screen {
     return document.elementFromPoint(screen.x, screen.y) === this.canvas;
   }
 
-  private groundPoint(screen: Point): THREE.Vector3 | null {
+  /** Punto del suelo (o de la azotea del palacio) bajo el ratón. */
+  private groundPoint(screen: Point, roof = false): THREE.Vector3 | null {
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.set(((screen.x - rect.left) / rect.width) * 2 - 1, -((screen.y - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.view.camera);
-    return this.raycaster.ray.intersectPlane(this.ground, this.hit);
+    return this.raycaster.ray.intersectPlane(roof ? this.roof : this.ground, this.hit);
   }
 
   private readonly onPointerDown = (e: PointerEvent): void => {
@@ -431,7 +700,10 @@ export class RiotScreen implements Screen {
       this.dragStart = at;
       this.boxActive = false;
     } else if (e.button === 2) {
-      if (this.placeType) {
+      if (this.movingId !== null) {
+        this.cancelMove();
+        audio.play('cancel');
+      } else if (this.placeType) {
         this.disarm();
         audio.play('cancel');
       } else {
@@ -444,7 +716,7 @@ export class RiotScreen implements Screen {
     this.mouse = { x: e.clientX, y: e.clientY };
     this.shiftHeld = e.shiftKey;
     const start = this.dragStart;
-    if (!start || this.placeType) return;
+    if (!start || this.placeType || this.movingId !== null) return;
     if (!this.boxActive && Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_TOLERANCE_PX) this.boxActive = true;
     if (this.boxActive) {
       const s = this.selectBox.style;
@@ -474,6 +746,10 @@ export class RiotScreen implements Screen {
     this.dragStart = null;
     this.selectBox.style.display = 'none';
     if (!start) return;
+    if (this.movingId !== null) {
+      this.finishMove();
+      return;
+    }
     if (this.boxActive) {
       this.boxActive = false;
       this.boxSelect(start, at, e.shiftKey);
@@ -484,11 +760,12 @@ export class RiotScreen implements Screen {
   };
 
   private readonly onDoubleClick = (e: MouseEvent): void => {
-    if (this.placeType) return;
+    if (this.placeType || this.movingId !== null) return;
     const unit = this.unitAt({ x: e.clientX, y: e.clientY });
     if (!unit) return;
     this.selected.clear();
     for (const u of this.sim.units) if (u.type === unit.type) this.selected.add(u.id);
+    if (UNITS[unit.type].speed > 0) this.tutorialSignal('select');
   };
 
   private readonly onWheel = (e: WheelEvent): void => {
@@ -509,13 +786,22 @@ export class RiotScreen implements Screen {
       e.preventDefault();
       this.o.loop.paused = !this.o.loop.paused;
     } else if (e.code === 'Escape') {
-      if (this.placeType) this.disarm();
+      if (this.movingId !== null) this.cancelMove();
+      else if (this.placeType) this.disarm();
       else this.selected.clear();
     } else if (e.code === 'KeyM') {
       audio.toggleMute();
+    } else if (e.code === 'KeyR' && this.movingId !== null) {
+      this.moveHeading = (this.moveHeading + Math.PI / 4) % (Math.PI * 2);
+      audio.play('click');
+    } else if (e.code === 'Delete' || e.code === 'Backspace') {
+      this.removeBarricades(this.selected);
     } else if (e.code === 'KeyR' && this.placeType) {
       this.rowAngle = (this.rowAngle + Math.PI / 4) % (Math.PI * 2);
       audio.play('click');
+    } else if (/^Digit[5-7]$/.test(e.code)) {
+      const id = GADGET_ORDER.find((g) => GADGETS[g].key === e.code.slice(5));
+      if (id) this.triggerGadget(id);
     } else if (/^Digit[1-4]$/.test(e.code)) {
       this.requestForce(Number(e.code.slice(5)) - 1);
     } else if (e.code === 'KeyF') {
@@ -542,5 +828,8 @@ export class RiotScreen implements Screen {
     this.hud.dispose();
     this.cursorTip.remove();
     this.selectBox.remove();
+    this.crowdTip.remove();
+    for (const el of this.barricadeTools.values()) el.remove();
+    this.tutorial?.dispose();
   }
 }

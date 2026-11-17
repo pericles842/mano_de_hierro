@@ -26,9 +26,12 @@ export class VoxelParticles {
   private readonly matrix = new THREE.Matrix4();
   private count = 0;
 
-  constructor(private readonly capacity = 2500) {
+  /** `opacity` < 1: partículas translúcidas (la nube de gas deja ver lo que pasa dentro). */
+  constructor(private readonly capacity = 2500, opacity = 1) {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const material = new THREE.MeshLambertMaterial(
+      opacity < 1 ? { color: 0xffffff, transparent: true, opacity, depthWrite: false } : { color: 0xffffff },
+    );
     this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
     this.mesh.frustumCulled = false;
     this.mesh.setColorAt(0, new THREE.Color(0xffffff));

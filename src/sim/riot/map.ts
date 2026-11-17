@@ -92,3 +92,12 @@ export function constrain(p: { x: number; z: number }): void {
 export function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
 }
+
+/** Azotea del palacio: donde se apostan los francotiradores (sobre la cornisa, sin la cúpula). */
+export const PALACE_ROOF = { minX: -8.5, maxX: 8.5, minZ: -29.5, maxZ: -22.6, y: 7.5, domeX: 0, domeZ: -27, domeR: 2.8 } as const;
+
+export function isOnPalaceRoof(x: number, z: number): boolean {
+  const r = PALACE_ROOF;
+  const inside = x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+  return inside && Math.hypot(x - r.domeX, z - r.domeZ) > r.domeR;
+}

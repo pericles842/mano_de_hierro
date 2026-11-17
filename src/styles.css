@@ -576,3 +576,195 @@ html, body {
   .alerts { width: 280px; }
   .hud-status, .hud-prisoners { min-width: 0; }
 }
+
+/* Iconos flotantes sobre las barricadas seleccionadas: mover / quitar */
+.ui-root .barricade-tools {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(10, 11, 16, 0.85);
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  pointer-events: auto;
+  z-index: 5;
+}
+.ui-root .barricade-tool {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+.ui-root .barricade-tool:hover { border-color: var(--gold); background: rgba(245, 197, 24, 0.18); }
+
+/* Preparación: cuenta atrás y botón para empezar */
+.riot-planning { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; font: 700 14px var(--font); color: var(--gold); }
+.riot-planning .btn { padding: 4px 12px; }
+
+/* ── Iconos SVG ── */
+.icon { display: inline-block; vertical-align: -0.15em; flex: none; }
+.icon-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; }
+.dev-btn, .start-btn { display: inline-flex; align-items: center; gap: 6px; }
+.ui-root .barricade-tool { display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
+.ui-root .barricade-tool.danger:hover { border-color: var(--bad); background: rgba(248, 113, 113, 0.2); color: var(--bad); }
+.cursor-tip .icon { vertical-align: -0.2em; }
+.riot-help .icon { vertical-align: -0.1em; }
+
+/* ── Ficha de tropa (encima de la barra de abajo) ── */
+.unit-bar { position: absolute; }
+.unit-info {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  padding: 10px 12px;
+  background: rgba(14, 15, 22, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  font-size: 12px;
+}
+.unit-info-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.unit-info-icon { font-size: 26px; line-height: 1; }
+.unit-info-name { font-weight: 800; font-size: 14px; }
+.unit-info-tag { color: var(--gold); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+.unit-info-desc { color: var(--muted); line-height: 1.45; margin-bottom: 8px; }
+.unit-info-stats { display: grid; gap: 4px; margin-bottom: 8px; }
+.unit-stat { display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 8px; font-size: 11px; }
+.unit-stat-label { color: var(--muted); }
+.unit-stat-text { color: var(--text); font-weight: 600; }
+.unit-stat-bar { height: 5px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden; }
+.unit-stat-bar > span { display: block; height: 100%; background: var(--gold); border-radius: 3px; }
+.unit-info-hint { font-size: 11px; color: var(--muted); border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 6px; }
+.unit-info-hint.armed { color: var(--gold); font-weight: 600; }
+.riot-hud.unit-info-open .selected-info { display: none !important; }
+
+/* ── Tutorial ── */
+.tutorial {
+  position: absolute;
+  top: 160px;
+  left: 12px;
+  width: 300px;
+  padding: 12px 14px;
+  border-color: var(--gold);
+  z-index: 6;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.tutorial.done { border-color: var(--good); box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.35); }
+.tutorial-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.tutorial-tag { font: 700 10px var(--font); color: #111; background: var(--gold); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tutorial.done .tutorial-tag { background: var(--good); }
+.tutorial-progress { color: var(--muted); font-size: 11px; }
+.tutorial-title { font-weight: 800; font-size: 15px; margin-bottom: 4px; }
+.tutorial-text { font-size: 13px; line-height: 1.55; color: var(--text); }
+.tutorial-text .icon { color: var(--gold); vertical-align: -0.2em; }
+.tutorial-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+.tutorial-actions:empty { display: none; }
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 5px;
+  margin: 0 1px;
+  font: 700 11px var(--font);
+  line-height: 18px;
+  text-align: center;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+}
+.btn.small { padding: 4px 12px; font-size: 12px; }
+
+/* ── Inicio ── */
+.setup-question { font-weight: 800; color: var(--gold); text-align: center; margin-top: 14px !important; }
+
+@media (max-width: 800px) {
+  .tutorial { top: auto; bottom: 200px; width: calc(100vw - 32px); left: 16px; }
+  .unit-info { width: min(300px, calc(100vw - 32px)); }
+}
+
+/* ── Ficha del nivel de fuerza (a la izquierda del panel) ── */
+.force-panel { position: absolute; }
+.force-info {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  width: 260px;
+  padding: 10px 12px;
+  background: rgba(14, 15, 22, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  font-size: 12px;
+  text-align: left;
+}
+.force-info.lvl0 { border-color: #60a5fa; }
+.force-info.lvl1 { border-color: #facc15; }
+.force-info.lvl2 { border-color: #fb923c; }
+.force-info.lvl3 { border-color: #f87171; }
+.force-info.lvl0 .unit-stat-bar > span { background: #60a5fa; }
+.force-info.lvl1 .unit-stat-bar > span { background: #facc15; }
+.force-info.lvl2 .unit-stat-bar > span { background: #fb923c; }
+.force-info.lvl3 .unit-stat-bar > span { background: #f87171; }
+.force-info .unit-info-tag kbd { font-size: 10px; line-height: 14px; min-width: 16px; }
+@media (max-width: 800px) {
+  .force-info { right: 0; top: calc(100% + 8px); width: min(260px, calc(100vw - 32px)); }
+}
+
+/* ── Vehículos bloqueados en la preparación ── */
+.unit-card.locked { opacity: 0.55; filter: grayscale(0.6); }
+.unit-card.locked::after { content: '🚪'; position: absolute; top: 4px; left: 6px; font-size: 12px; }
+
+/* ── Ficha del manifestante bajo el ratón ── */
+.ui-root .crowd-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 230px;
+  padding: 8px 10px;
+  background: rgba(14, 15, 22, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  pointer-events: none;
+  font-size: 11px;
+  z-index: 7;
+}
+.crowd-tip-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 3px; }
+.crowd-tip-icon { font-size: 16px; }
+.crowd-tip-desc { color: var(--muted); line-height: 1.4; margin-bottom: 5px; }
+.crowd-tip-tags { color: var(--gold); margin-bottom: 5px; }
+.crowd-tip .unit-stat-bar > span { background: var(--good); }
+.cp-card.locked { opacity: 0.6; }
+.gadget-charges { display: flex; align-items: center; gap: 6px; }
+
+/* ── Gadgets (en el panel de fuerza) ── */
+.gadget-title { margin-top: 6px; }
+.gadget-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  font: 600 12px var(--font);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.gadget-btn:hover:not(:disabled) { border-color: var(--gold); background: rgba(245, 197, 24, 0.12); }
+.gadget-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gadget-name { flex: 1; }
+.gadget-count { color: var(--gold); font-weight: 800; }
+.force-info.gadget { border-color: var(--gold); }

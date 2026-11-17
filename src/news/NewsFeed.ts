@@ -147,7 +147,6 @@ export function riotHeadline(e: RiotEvent, def: RiotDef, city: string): [NewsIte
     case 'deployed':
       if (e.unitType === 'army') return [{ text: `El ejército sale a las calles de ${city}. El mundo observa.`, source: 'internacional' }, 'army'];
       if (e.unitType === 'tanqueta') return [{ text: 'Tanquetas en la plaza: «Están ahí para ordenar el tránsito», aclara el gobierno.', source: 'oficial' }, 'tanqueta'];
-      if (e.unitType === 'helicopter') return [{ text: 'Helicópteros sobrevuelan la protesta con reflectores.', source: 'internacional' }, 'heli'];
       return null;
     case 'desert':
       return [{ text: '¡Soldados se niegan a reprimir y se unen a la multitud entre aplausos!', source: 'internacional' }, 'desert'];

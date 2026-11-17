@@ -10,7 +10,7 @@ function sim(over: Partial<RiotConfig> = {}): RiotSim {
   return new RiotSim({
     def: RIOTS.chalecos,
     scale: 1,
-    stock: makeStock({ soldier: 10, gasser: 4, shotgun: 4, capture: 2, negotiator: 2, army: 6, helicopter: 1, supply: 1, bulldozer: 1 }),
+    stock: makeStock({ soldier: 10, gasser: 4, shotgun: 4, capture: 2, negotiator: 2, army: 6, supply: 1 }),
     loyalty: 70,
     unrest: 30,
     seed: 7,
@@ -29,6 +29,7 @@ describe('unidades especiales', () => {
   it('el granadero lanza gas, gasta munición y crea nubes', () => {
     const s = sim();
     const g = s.deploy('gasser', 0, 10)!;
+    s.setForce(1); // el gas llega con «Contención agresiva»
     run(s, PREP_TIME + 20);
     expect(g.ammo).toBeLessThan(g.maxAmmo);
     expect(s.harshness).toBeGreaterThan(0);
@@ -61,12 +62,6 @@ describe('unidades especiales', () => {
     expect(s.anger).toBeLessThan(start);
   });
 
-  it('el helicóptero vuela: no bloquea a nadie y las piedras no le llegan', () => {
-    const s = sim({ unrest: 90 });
-    const heli = s.deploy('helicopter', 0, 10)!;
-    run(s, PREP_TIME + 40);
-    expect(heli.integrity).toBe(heli.maxIntegrity);
-  });
 
   it('el camión de suministros recarga munición', () => {
     const s = sim();

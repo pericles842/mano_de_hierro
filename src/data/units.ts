@@ -6,16 +6,17 @@ export type UnitType =
   | 'moto'
   | 'capture'
   | 'negotiator'
+  | 'k9'
+  | 'sniper'
+  | 'colectivo'
   | 'barricade'
   | 'ballena'
   | 'gastruck'
   | 'tanqueta'
-  | 'bulldozer'
-  | 'helicopter'
   | 'supply'
   | 'army';
 
-export type UnitCategory = 'policia' | 'vehiculos' | 'ejercito';
+export type UnitCategory = 'policia' | 'vehiculos' | 'especiales' | 'ejercito';
 
 export interface UnitDef {
   type: UnitType;
@@ -53,6 +54,30 @@ export interface UnitDef {
   /** Vuela: no choca con nadie y las piedras no le llegan. */
   flying?: boolean;
   intlPressureOnDeploy?: number;
+  /**
+   * Cuánto calienta a la multitud mientras está en la calle (ira por segundo).
+   * Las tropas agresivas trabajan solas, pero su sola presencia provoca.
+   */
+  provoke?: number;
+  /** Segundos que dura su nube de gas (granadero: corta y frecuente). */
+  gasLife?: number;
+  /**
+   * Presencia intimidante, a cualquier nivel de fuerza: los tranquilos se asustan y pierden ánimo;
+   * radicales, escuderos y líderes se enfadan. `byStage` = efecto en cada fase (Pacífica…Caos).
+   */
+  presence?: { radius: number; strength: number; byStage: readonly [number, number, number, number] };
+  /** Oculta por ahora: no aparece en la barra ni en el despacho. */
+  hidden?: boolean;
+}
+
+/** Francotiradores: se apostan en la azotea del palacio (no se colocan en la plaza). */
+export function isRooftop(type: UnitType): boolean {
+  return type === 'sniper';
+}
+
+/** Vehículos: no se colocan en la preparación; salen de la puerta del palacio durante la protesta. */
+export function isVehicle(type: UnitType): boolean {
+  return UNITS[type].category === 'vehiculos' && type !== 'barricade';
 }
 
 export const UNIT_ORDER: readonly UnitType[] = [
@@ -63,12 +88,13 @@ export const UNIT_ORDER: readonly UnitType[] = [
   'moto',
   'capture',
   'negotiator',
+  'k9',
+  'sniper',
+  'colectivo',
   'barricade',
   'ballena',
   'gastruck',
   'tanqueta',
-  'bulldozer',
-  'helicopter',
   'supply',
   'army',
 ];
@@ -76,6 +102,7 @@ export const UNIT_ORDER: readonly UnitType[] = [
 export const CATEGORY_NAMES: Record<UnitCategory, string> = {
   policia: 'Policía',
   vehiculos: 'Vehículos y defensas',
+  especiales: 'Especiales',
   ejercito: 'Ejército',
 };
 
@@ -88,7 +115,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Antidisturbios',
     icon: '👮',
-    description: 'Barato y ágil. Empuja y dispersa a corta distancia.',
+    description: 'Barato y ágil. Empuja y dispersa de cerca. Con más fuerza sale a buscar a la gente, golpea, da palizas y en Mano dura saca la pistola.',
     price: 60,
     upkeep: 6,
     radius: 0.5,
@@ -104,7 +131,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Muro de escudos',
     icon: '🛡️',
-    description: 'Formación de tres agentes. Lenta pero casi impenetrable.',
+    description: 'Tres agentes tras un muro de escudos que golpean con ellos. Lenta pero casi impenetrable. Golpea, da palizas y en Mano dura dispara.',
+    provoke: 0.0003,
     price: 130,
     upkeep: 12,
     radius: 0.6,
@@ -121,7 +149,9 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Granadero de gas',
     icon: '🧪',
-    description: 'Lanza botes de gas lacrimógeno a distancia. La nube dispersa por zona y el viento la arrastra.',
+    description: 'Desde Contención agresiva lanza botes de gas a distancia: nubes cortas (4 s) cada 2 s. El viento las arrastra.',
+    provoke: 0.0004,
+    gasLife: 4,
     price: 110,
     upkeep: 9,
     radius: 0.5,
@@ -132,7 +162,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     integrity: 45,
     ammo: 8,
     range: 15,
-    cooldown: 4,
+    cooldown: 2,
   },
   shotgun: {
     ...BASE,
@@ -140,7 +170,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Escopetero',
     icon: '🎯',
-    description: 'Perdigones de goma a distancia. Dispersa rapidísimo, pero enfurece a todos.',
+    description: 'Desde Fuerza dispersiva dispara perdigones de goma a distancia. Dispersa rapidísimo, pero enfurece a todos. En Mano dura, munición letal.',
+    provoke: 0.0006,
     price: 120,
     upkeep: 10,
     radius: 0.5,
@@ -159,7 +190,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Motorizados',
     icon: '🏍️',
-    description: 'Caballería: embisten grupos y los atraviesan, persiguen a los que huyen (los médicos ya no los recuperan) y desmoralizan las oleadas que entran por su calle.',
+    description: 'Agresivos y por su cuenta: embisten grupos, arrastran a líderes y manifestantes fuera de la plaza y persiguen a los que huyen. Su presencia provoca.',
+    provoke: 0.0008,
     price: 150,
     upkeep: 12,
     radius: 0.6,
@@ -169,6 +201,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 9,
     pushRadius: 1.8,
     dispersal: 0.15,
+    presence: { radius: 6, strength: 0.06, byStage: [1, 1, 0.5, 0] },
     integrity: 60,
   },
   capture: {
@@ -177,7 +210,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     category: 'policia',
     name: 'Equipo de captura',
     icon: '🕶️',
-    description: 'Defiende su posición y sale a arrestar líderes cercanos y poco protegidos. Clic derecho sobre un líder para ordenar su captura. Cada preso suma molestia social.',
+    description: 'Sale solo a cazar: prefiere líderes, luego radicales, luego cualquiera. Clic derecho sobre alguien para ordenar su captura. Cada preso suma molestia social.',
+    provoke: 0.0006,
     price: 140,
     upkeep: 12,
     radius: 0.5,
@@ -205,6 +239,66 @@ export const UNITS: Record<UnitType, UnitDef> = {
     integrity: 30,
     range: 8,
   },
+  k9: {
+    ...BASE,
+    type: 'k9',
+    category: 'policia',
+    name: 'Brigada canina',
+    icon: '🐕',
+    description: 'Agente con perro. Asusta mucho a la gente tranquila (los radicales se enfurecen) en cualquier fase. Desde Contención agresiva muerde: el mordido cae y huye. Persigue a los que escapan.',
+    provoke: 0.0007,
+    price: 160,
+    upkeep: 12,
+    radius: 0.55,
+    rowSpacing: 1.6,
+    speed: 5,
+    pushRadius: 1.6,
+    dispersal: 0.15,
+    presence: { radius: 6, strength: 0.1, byStage: [1, 1, 1, 0.5] },
+    integrity: 60,
+    cooldown: 3,
+  },
+  sniper: {
+    ...BASE,
+    type: 'sniper',
+    category: 'especiales',
+    name: 'Francotirador',
+    icon: '🎯',
+    description: 'Colócalo donde quieras sobre la azotea del palacio: nadie le alcanza. Solo con Mano dura: abate a los armados, luego a los líderes y a los radicales. Cada líder abatido desmoraliza a la plaza.',
+    provoke: 0.0004,
+    price: 350,
+    upkeep: 25,
+    radius: 0.4,
+    rowSpacing: 2,
+    speed: 0,
+    pushRadius: 0,
+    dispersal: 0,
+    flying: true,
+    infantry: false,
+    integrity: 80,
+    range: 45,
+  },
+  colectivo: {
+    ...BASE,
+    type: 'colectivo',
+    category: 'especiales',
+    infantry: false, // no se repliegan por la moral: van a lo suyo
+    name: 'Colectivo paramilitar',
+    icon: '🏴',
+    description: 'Civiles leales en moto. Atacan por su cuenta a cualquier nivel de fuerza: embisten y apalean. No visten uniforme: la prensa los asocia menos al régimen. Impredecibles: con la plaza encendida, a veces se les va la mano.',
+    provoke: 0.001,
+    price: 120,
+    upkeep: 8,
+    radius: 0.6,
+    halfLength: 0.5,
+    axis: 'z',
+    rowSpacing: 1.8,
+    speed: 7.5,
+    pushRadius: 1.8,
+    dispersal: 0.2,
+    presence: { radius: 6, strength: 0.07, byStage: [1, 1, 0.6, 0.3] },
+    integrity: 55,
+  },
   barricade: {
     ...BASE,
     type: 'barricade',
@@ -212,7 +306,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false,
     name: 'Barricada',
     icon: '🚧',
-    description: 'Fija. Corta el paso y desvía a la multitud.',
+    description: 'Fija. Corta el paso y desvía a la multitud. Mejórala en el despacho: concreto y pinchos.',
     price: 40,
     upkeep: 0,
     radius: 0.5,
@@ -230,7 +324,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false,
     name: 'Ballena',
     icon: '🐋',
-    description: 'Camión hidrante. Dispersa grupos a distancia mientras le quede agua.',
+    description: 'Camión hidrante. Apaga el fuego a cualquier nivel; desde Contención agresiva dispersa grupos con el chorro. Intimida en Pacífica y Tensa. Sale del palacio.',
+    provoke: 0.0006,
     price: 450,
     upkeep: 25,
     radius: 1.2,
@@ -240,6 +335,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 3.2,
     pushRadius: 0,
     dispersal: 0,
+    presence: { radius: 8, strength: 0.07, byStage: [1, 1, 0, 0] },
     integrity: 300,
     water: 40,
     sprayRange: 13,
@@ -251,7 +347,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false,
     name: 'Camión lanzagás',
     icon: '🚚',
-    description: 'Artillería de gas: salvas al grupo más numeroso. La gente no quiere cruzar las nubes: sirven de muro. Selecciónalo y pulsa F para apuntar a mano.',
+    description: 'Artillería de gas desde Contención agresiva: salvas al grupo más numeroso. Las nubes sirven de muro. Pulsa F para apuntar a mano. Sale del palacio.',
+    provoke: 0.0008,
     price: 600,
     upkeep: 30,
     radius: 1.2,
@@ -261,6 +358,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 3,
     pushRadius: 0,
     dispersal: 0,
+    presence: { radius: 8, strength: 0.07, byStage: [1, 0, 0, 0] },
     integrity: 280,
     ammo: 6,
     range: 17,
@@ -273,7 +371,8 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false,
     name: 'Tanqueta',
     icon: '🚔',
-    description: 'Zona de miedo visible: la gente tranquila que entra se da la vuelta. Atrae las piedras y bombas para proteger a tu infantería. Cada segundo en la plaza sube la presión internacional.',
+    description: 'Aplasta el fuego al pasar. Zona de miedo: la gente tranquila que entra se da la vuelta. Atrae piedras y bombas para proteger a tu infantería. Provoca mucho y sube la presión internacional. Sale del palacio.',
+    provoke: 0.0015,
     price: 800,
     upkeep: 40,
     radius: 1.2,
@@ -283,49 +382,10 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 3,
     pushRadius: 2.4,
     dispersal: 0.1,
+    presence: { radius: 10, strength: 0.09, byStage: [1, 1, 0.5, 0] },
     integrity: 500,
     fearAura: 10,
     intlPressureOnDeploy: 3,
-  },
-  bulldozer: {
-    ...BASE,
-    type: 'bulldozer',
-    category: 'vehiculos',
-    infantry: false,
-    name: 'Topadora',
-    icon: '🚜',
-    description: 'Muro móvil: barre a la multitud al avanzar, apaga cauchos (es inmune al fuego) y repara las barricadas cercanas.',
-    price: 500,
-    upkeep: 20,
-    radius: 1.3,
-    halfLength: 1.2,
-    axis: 'z',
-    rowSpacing: 3.2,
-    speed: 2.5,
-    pushRadius: 2.2,
-    dispersal: 0.12,
-    integrity: 600,
-    range: 3,
-  },
-  helicopter: {
-    ...BASE,
-    type: 'helicopter',
-    category: 'vehiculos',
-    infantry: false,
-    name: 'Helicóptero',
-    icon: '🚁',
-    description: 'Reflector que marca líderes (los equipos de captura los persiguen desde lejos), bombardeo de gas cada 12 s, aviso de la próxima oleada y, de noche, tus tropas cercanas rinden más.',
-    price: 900,
-    upkeep: 45,
-    radius: 1.5,
-    axis: 'z',
-    rowSpacing: 4,
-    speed: 7,
-    pushRadius: 0,
-    dispersal: 0,
-    integrity: 400,
-    range: 7,
-    flying: true,
   },
   supply: {
     ...BASE,
@@ -334,7 +394,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     infantry: false,
     name: 'Camión de suministros',
     icon: '📦',
-    description: 'Recarga gas, perdigones y agua a las unidades cercanas, y les sube la moral.',
+    description: 'Recarga gas, perdigones y agua a las unidades cercanas, y les sube la moral. Sale del palacio.',
     price: 300,
     upkeep: 12,
     radius: 1.1,
@@ -344,6 +404,7 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 3.5,
     pushRadius: 0,
     dispersal: 0,
+    hidden: true,
     integrity: 200,
     range: 7,
   },
@@ -363,10 +424,13 @@ export const UNITS: Record<UnitType, UnitDef> = {
     speed: 3.2,
     pushRadius: 2.4,
     dispersal: 0.3,
+    provoke: 0.002,
     integrity: 220,
     fearAura: 12,
     intlPressureOnDeploy: 4,
   },
 };
 
-export const BUYABLE_UNITS: readonly UnitType[] = UNIT_ORDER.filter((t) => UNITS[t].price > 0);
+export const BUYABLE_UNITS: readonly UnitType[] = UNIT_ORDER.filter((t) => UNITS[t].price > 0 && !UNITS[t].hidden);
+/** Tropas que se ven en la barra de la revuelta. */
+export const VISIBLE_UNITS: readonly UnitType[] = UNIT_ORDER.filter((t) => !UNITS[t].hidden);

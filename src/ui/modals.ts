@@ -49,15 +49,18 @@ function cleanName(raw: string, fallback: string): string {
   return name.length > 0 ? name : fallback;
 }
 
-/** Pantalla de inicio: título del juego y nombres del dictador y de la capital. */
-export function showSetup(parent: HTMLElement, defaults: PlayerNames, onStart: (names: PlayerNames) => void): void {
+/**
+ * Pantalla de inicio: título, nombres del dictador y de la capital, y la pregunta
+ * «¿primera vez en el poder?» (que lleva al tutorial).
+ */
+export function showSetup(parent: HTMLElement, defaults: PlayerNames, onStart: (names: PlayerNames, tutorial: boolean) => void): void {
   const ruler = nameField('Tu nombre, Generalísimo', defaults.rulerName, DICTATOR.name);
   const city = nameField('Nombre de la capital', defaults.cityName, COUNTRY.capital);
-  const start = (): void =>
-    onStart({
-      rulerName: cleanName(ruler.input.value, DICTATOR.name),
-      cityName: cleanName(city.input.value, COUNTRY.capital),
-    });
+  const names = (): PlayerNames => ({
+    rulerName: cleanName(ruler.input.value, DICTATOR.name),
+    cityName: cleanName(city.input.value, COUNTRY.capital),
+  });
+  const start = (): void => onStart(names(), false);
   for (const input of [ruler.input, city.input]) {
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -87,8 +90,12 @@ export function showSetup(parent: HTMLElement, defaults: PlayerNames, onStart: (
         h('li', { text: 'La gente recuerda: la represión sube la molestia social y la presión internacional.' }),
         h('li', { text: 'Lealtad militar a 0: golpe de Estado. Popularidad a 0: revolución.' }),
       ]),
+      h('p', { class: 'setup-question', text: '¿Es tu primera vez en el poder?' }),
     ],
-    [{ label: 'Asumir el poder (otra vez)', primary: true, onClick: start }],
+    [
+      { label: 'Es mi primera vez: enséñame', onClick: () => onStart(names(), true) },
+      { label: 'Tomar el poder otra vez', primary: true, onClick: start },
+    ],
     'intro',
   );
   window.setTimeout(() => ruler.input.select(), 50);

@@ -16,9 +16,16 @@ import {
 } from './models';
 import { VoxelParticles } from './particles';
 import { buildRiotEnvironment, type RiotEnvironment } from './riotEnvironment';
+import { SoundWaves } from './soundWaves';
+import { FORCE_GATES } from '../data/forceLevels';
+
+/** Las marcas de manifestantes comparten temporizadores con las tropas: desplazar sus ids. */
+const PROTESTER_FX_ID = 1_000_000;
 
 const SKY = 0xa9c7e0;
 const HELI_ALTITUDE = 9;
+/** Altura de la azotea del palacio (francotiradores). */
+const ROOF_Y = 7.5;
 const NIGHT_SKY = 0x0d1224;
 const FLAME_COLORS = [0xff6a00, 0xffb300, 0xff3d00, 0xffd54a];
 
@@ -26,6 +33,8 @@ export interface GhostPlacement {
   x: number;
   z: number;
   valid: boolean;
+  /** Altura (azotea del palacio para francotiradores). */
+  y?: number;
 }
 
 /** Dibuja una RiotSim. Solo lee el estado de la simulación; nunca lo modifica. */
@@ -39,6 +48,8 @@ export class RiotView {
   private readonly unitMeshes = new Map<number, THREE.Mesh>();
   private readonly seen = new Set<number>();
   private readonly particles = new VoxelParticles(4000);
+  /** Nube de gas lacrimógeno: translúcida para que se vea lo que pasa dentro (palizas, arrestos). */
+  private readonly gasFx = new VoxelParticles(2500, 0.32);
   private readonly ringGeometry = new THREE.RingGeometry(1, 1.18, 32);
   private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.9 });
   private readonly markerMaterial = new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true });
@@ -55,15 +66,6 @@ export class RiotView {
   /** Zona de miedo de la tanqueta. */
   private readonly fearRingGeometry = new THREE.RingGeometry(9.6, 10, 48);
   private readonly fearRingMaterial = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.3, depthWrite: false });
-  /** Haz del reflector del helicóptero. */
-  private readonly beamGeometry = new THREE.CylinderGeometry(0.4, 3.5, HELI_ALTITUDE, 16, 1, true);
-  private readonly beamMaterial = new THREE.MeshBasicMaterial({
-    color: 0xfff3b0,
-    transparent: true,
-    opacity: 0.13,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
   private readonly ghostOk = ghostMaterial(0xffffff);
   private readonly ghostBad = ghostMaterial(0xff4444);
   private readonly ghosts: THREE.Mesh[] = [];
@@ -74,6 +76,9 @@ export class RiotView {
   private smokeAccumulator = 0;
   private fireAccumulator = 0;
   private time = 0;
+  private frameSimDt = 0;
+  /** Ondas rojas: megáfono del negociador y agentes repeliendo. */
+  private readonly waves = new SoundWaves(this.particles);
   private readonly dummy = new THREE.Object3D();
   private readonly dummy2 = new THREE.Object3D();
   private readonly shade = new THREE.Color();
@@ -129,6 +134,8 @@ export class RiotView {
     this.scene.add(this.blood, this.marks);
 
     this.scene.add(this.particles.mesh);
+    this.gasFx.mesh.renderOrder = 4;
+    this.scene.add(this.gasFx.mesh);
 
     this.moveMarker = new THREE.Mesh(this.ringGeometry, this.markerMaterial);
     this.moveMarker.rotation.x = -Math.PI / 2;
@@ -179,10 +186,11 @@ export class RiotView {
           fx.burst(e.x, 1.5, e.z, 14, 0x4d5b2e, 3, 0.25, 0.9);
           break;
         case 'liveShot': {
-          fx.ballistic(e.fromX, 1.3, e.fromZ, e.toX, 1, e.toZ, 60, 0xfff7c2, 0.08);
+          const fy = e.fromZ < -22.5 ? ROOF_Y + 0.3 : 1.3; // francotirador en la azotea
+          fx.ballistic(e.fromX, fy, e.fromZ, e.toX, 1, e.toZ, 60, 0xfff7c2, 0.08);
           const dx = Math.sign(e.toX - e.fromX) * 0.5;
           const dz = Math.sign(e.toZ - e.fromZ) * 0.5;
-          fx.burst(e.fromX + dx, 1.3, e.fromZ + dz, 4, 0xffc247, 3, 0.12, 0.12); // fogonazo
+          fx.burst(e.fromX + dx, fy, e.fromZ + dz, 4, 0xffc247, 3, 0.12, 0.12); // fogonazo
           if (e.result !== 'miss') fx.burst(e.toX, 1, e.toZ, e.result === 'kill' ? 6 : 3, 0xb91c1c, 1.8, 0.12, 0.5);
           break;
         }
@@ -219,6 +227,39 @@ export class RiotView {
         case 'disperse':
           fx.burst(e.x, 1.8, e.z, 2, 0xffffff, 1.5, 0.12, 0.5);
           break;
+        case 'bite':
+          fx.burst(e.x, 0.6, e.z, 4, 0xdc2626, 1.5, 0.1, 0.35); // mordisco
+          break;
+        case 'pepper': {
+          // Chorro de pimienta: cubitos naranjas en cono hacia delante.
+          const dx = e.toX - e.fromX;
+          const dz = e.toZ - e.fromZ;
+          for (let k = 0; k < 10; k++) {
+            const sp = 0.6 + Math.random() * 0.6;
+            fx.spawn({
+              x: e.fromX + dx * 0.2, y: 1.1, z: e.fromZ + dz * 0.2,
+              vx: dx * sp * 1.6 + (Math.random() - 0.5) * 1.2, vy: Math.random() * 0.4, vz: dz * sp * 1.6 + (Math.random() - 0.5) * 1.2,
+              life: 0.6, size: 0.16, sizeEnd: 0.45, color: k % 2 ? 0xf97316 : 0xfb923c, drag: 2,
+            });
+          }
+          break;
+        }
+        case 'flash':
+          fx.ballistic(e.fromX, 1.3, e.fromZ, e.toX, 0.3, e.toZ, 14, 0x374151, 0.12); // granada
+          fx.burst(e.toX, 1, e.toZ, 18, 0xffffff, 6, 0.22, 0.25); // destello
+          fx.burst(e.toX, 0.8, e.toZ, 8, 0xfde68a, 3, 0.16, 0.4);
+          break;
+        case 'leaderDown':
+          fx.burst(e.x, 1.6, e.z, 10, 0xfacc15, 2, 0.14, 0.6); // cae el megáfono
+          break;
+        case 'jam':
+          break;
+        case 'beating':
+          // Cada golpe: chispa blanca del impacto, gotitas rojas y polvo del suelo.
+          fx.burst(e.x, 0.5, e.z, 3, 0xffffff, 2.2, 0.1, 0.18);
+          fx.burst(e.x, 0.4, e.z, 4, 0xdc2626, 1.4, 0.11, 0.4);
+          fx.burst(e.x, 0.15, e.z, 3, 0xa8a29e, 1.2, 0.18, 0.45);
+          break;
         case 'unitBroken':
           fx.burst(e.x, 1, e.z, 16, e.unitType === 'tanqueta' ? 0x5b6b3a : 0x9ca3af, 4, 0.3, 1.2);
           break;
@@ -231,8 +272,9 @@ export class RiotView {
   }
 
   private impact(x: number, z: number, level: number): void {
+    // Humo del choque: translúcido, como el gas, para que se vea lo que pasa debajo.
     for (let i = 0; i < 4; i++) {
-      this.particles.spawn({
+      this.gasFx.spawn({
         x: x + (Math.random() - 0.5) * 1.5,
         y: 0.6,
         z: z + (Math.random() - 0.5) * 1.5,
@@ -282,7 +324,7 @@ export class RiotView {
       const p = placements[i];
       g.visible = p !== undefined;
       if (!p) return;
-      g.position.set(p.x, 0.02, p.z);
+      g.position.set(p.x, p.y ?? 0.02, p.z);
       g.rotation.y = heading;
       g.material = p.valid ? this.ghostOk : this.ghostBad;
     });
@@ -291,6 +333,7 @@ export class RiotView {
   /** @param simDt tiempo de juego transcurrido (0 en pausa) para animaciones y partículas. */
   render(renderer: THREE.WebGLRenderer, alpha: number, simDt: number, selected: ReadonlySet<number>): void {
     this.time += simDt;
+    this.frameSimDt = simDt;
     this.renderCrowd(alpha);
     this.renderUnits(alpha, selected);
 
@@ -307,6 +350,7 @@ export class RiotView {
     this.fireParticles(simDt);
     this.gasParticles(simDt);
     this.particles.update(simDt);
+    this.gasFx.update(simDt);
     renderer.render(this.scene, this.camera);
   }
 
@@ -359,6 +403,12 @@ export class RiotView {
         }
       }
       this.dummy.updateMatrix();
+      // Marcas por clase: el líder arenga, la prensa dispara flashes, el médico brilla en verde.
+      if (!down && p.state !== 'fleeing') {
+        const fxKind = p.kind === 'lider' ? 'leader' : p.kind === 'prensa' ? 'flash' : p.kind === 'medico' ? 'medic' : null;
+        if (fxKind) this.waves.emit(PROTESTER_FX_ID + p.id, fxKind, x, z, heading, this.frameSimDt);
+        if (p.stunned > 0) this.waves.emit(PROTESTER_FX_ID * 2 + p.id, 'stun', x, z, heading, this.frameSimDt); // aturdido
+      }
       const model = this.modelFor(p);
       const mesh = this.crowd[model];
       const idx = counts[model]++;
@@ -394,7 +444,7 @@ export class RiotView {
   private renderUnits(alpha: number, selected: ReadonlySet<number>): void {
     this.seen.clear();
     let ring = 0;
-    const gear = gearFrom(this.sim.upgrades, this.sim.forceLevel >= 3);
+    const gear = gearFrom(this.sim.upgrades, this.sim.forceLevel >= FORCE_GATES.lethal);
     // Cuerpos de agentes caídos.
     while (this.unitBodies.length < this.sim.bodies.length) {
       const body = this.sim.bodies[this.unitBodies.length];
@@ -414,26 +464,38 @@ export class RiotView {
         this.scene.add(mesh);
         this.unitMeshes.set(u.id, mesh);
       }
-      // El equipo cambia a la vista: porra/bate, visera, máscara, escudo y fusil con mano dura.
-      if (u.type === 'soldier' || u.type === 'shield') {
+      // El equipo cambia a la vista: porra/bate, visera, máscara, escudo, pistola con mano dura y barricada mejorada.
+      if (u.type === 'soldier' || u.type === 'shield' || u.type === 'barricade') {
         const geometry = getUnitModel(u.type, gear);
         if (mesh.geometry !== geometry) mesh.geometry = geometry;
       }
       const x = u.px + (u.x - u.px) * alpha;
       const z = u.pz + (u.z - u.pz) * alpha;
       const flying = UNITS[u.type].flying === true;
-      mesh.position.set(x, flying ? HELI_ALTITUDE + Math.sin(this.time * 2 + u.id) * 0.3 : 0, z);
+      // Golpe con el escudo / empujón: la tropa embiste hacia delante a ratos mientras repele.
+      const beating = u.beatTimer > 0;
+      // Golpe: subir y bajar el brazo (porra) o embestir con el escudo, rápido y seco.
+      const strike = beating ? Math.abs(Math.sin(this.time * (Math.PI / 0.45))) : 0;
+      const lunge = beating
+        ? strike * (u.type === 'shield' ? 0.35 : 0.25)
+        : u.pushing ? Math.max(0, Math.sin(this.time * 9 + u.id)) * (u.type === 'shield' ? 0.22 : 0.14) : 0;
+      mesh.position.set(
+        x + Math.sin(u.heading) * lunge,
+        u.type === 'sniper' ? ROOF_Y : flying ? HELI_ALTITUDE + Math.sin(this.time * 2 + u.id) * 0.3 : 0,
+        z + Math.cos(u.heading) * lunge,
+      );
       mesh.rotation.y = u.heading;
-      if (flying) {
-        const rotor = mesh.getObjectByName('rotor');
-        if (rotor) rotor.rotation.y = this.time * 25;
-      }
+      mesh.rotation.x = beating ? strike * 0.35 : 0; // se inclina sobre el que está en el suelo
+
+      if (u.talking) this.waves.emit(u.id, 'megaphone', x, z, u.heading, this.frameSimDt);
+      else if (u.pushing) this.waves.emit(u.id, 'push', x, z, u.heading, this.frameSimDt);
+      else this.waves.idle(u.id);
 
       if (selected.has(u.id)) {
         const def = UNITS[u.type];
         const r = this.ringAt(ring++);
         r.visible = true;
-        r.position.set(x, 0.06, z);
+        r.position.set(x, u.type === 'sniper' ? ROOF_Y + 0.06 : 0.06, z);
         r.scale.setScalar(def.halfLength + def.radius + 0.4);
       }
     }
@@ -442,11 +504,13 @@ export class RiotView {
       if (this.seen.has(id)) continue;
       this.scene.remove(mesh);
       this.unitMeshes.delete(id);
+      this.waves.idle(id, false);
     }
   }
 
   private createUnitMesh(type: UnitType): THREE.Mesh {
     const mesh = new THREE.Mesh(getModel(type), VOXEL_MATERIAL);
+    mesh.rotation.order = 'YXZ'; // inclinación (x) relativa a hacia dónde mira (y)
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     if (type === 'tanqueta') {
@@ -454,14 +518,6 @@ export class RiotView {
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.05;
       mesh.add(ring);
-    }
-    if (type === 'helicopter') {
-      const rotor = new THREE.Mesh(getModel('rotor'), VOXEL_MATERIAL);
-      rotor.name = 'rotor';
-      rotor.position.y = 2.6;
-      const beam = new THREE.Mesh(this.beamGeometry, this.beamMaterial);
-      beam.position.y = -HELI_ALTITUDE / 2;
-      mesh.add(rotor, beam);
     }
     return mesh;
   }
@@ -474,7 +530,7 @@ export class RiotView {
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
         const r = Math.sqrt(Math.random()) * g.r;
-        this.particles.spawn({
+        this.gasFx.spawn({
           x: g.x + Math.cos(a) * r,
           y: 0.3 + Math.random() * 0.8,
           z: g.z + Math.sin(a) * r,
@@ -550,14 +606,13 @@ export class RiotView {
   dispose(): void {
     this.env.dispose();
     this.particles.dispose();
+    this.gasFx.dispose();
     this.crowd.forEach((m) => m.dispose());
     this.ringGeometry.dispose();
     this.ringMaterial.dispose();
     this.markerMaterial.dispose();
     this.ghostOk.dispose();
     this.ghostBad.dispose();
-    this.beamGeometry.dispose();
-    this.beamMaterial.dispose();
     this.blood.dispose();
     this.bloodGeometry.dispose();
     this.bloodMaterial.dispose();

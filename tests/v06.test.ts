@@ -10,7 +10,7 @@ function sim(over: Partial<RiotConfig> = {}, stock: Partial<Record<UnitType, num
   return new RiotSim({
     def: RIOTS.chalecos,
     scale: 1,
-    stock: makeStock({ soldier: 12, shotgun: 4, army: 4, moto: 3, capture: 2, tanqueta: 1, bulldozer: 1, gastruck: 1, helicopter: 1, barricade: 4, ...stock }),
+    stock: makeStock({ soldier: 12, shotgun: 4, army: 4, moto: 3, capture: 2, tanqueta: 1, gastruck: 1, barricade: 4, ...stock }),
     loyalty: 80,
     unrest: 40,
     seed: 11,
@@ -52,12 +52,21 @@ describe('fuego real', () => {
     expect(opened).toBe(true);
   });
 
-  it('los fusiles AK solo disparan con mano dura', () => {
-    const calm = sim({ upgrades: ['fusiles'] });
+  it('los antidisturbios no disparan por debajo de mano dura', () => {
+    const calm = sim();
     for (let x = -9; x <= 9; x += 3) calm.deploy('soldier', x, 12);
     calm.setForce(2);
     run(calm, PREP_TIME + 30);
     expect(calm.deaths).toBe(0);
+  });
+
+  it('con mano dura toda la policía saca la pistola, sin necesidad de mejora', () => {
+    const s = sim();
+    for (let x = -9; x <= 9; x += 3) s.deploy('soldier', x, 12);
+    s.setForce(3);
+    let shots = 0;
+    run(s, PREP_TIME + 40, () => (shots += s.events.filter((e) => e.type === 'liveShot').length));
+    expect(shots).toBeGreaterThan(0);
   });
 
   it('los muertos tienen consecuencias muy duras', () => {
@@ -80,7 +89,7 @@ describe('manifestantes armados', () => {
   it('con molestia extrema y caos, hay armas de fuego y pueden caer agentes', () => {
     const s = sim({ unrest: 95, def: RIOTS.puerto });
     for (let x = -12; x <= 12; x += 3) s.deploy('soldier', x, 8);
-    s.setForce(3);
+    s.setForce(2); // con mano dura la policía abatiría a los armados antes de que disparen
     let gunshots = 0;
     run(s, 110, () => (gunshots += s.events.filter((e) => e.type === 'gunshot').length));
     expect(gunshots).toBeGreaterThan(0);
@@ -116,6 +125,7 @@ describe('unidades rediseñadas', () => {
   it('el camión lanzagás obedece la orden manual (F)', () => {
     const s = sim();
     const truck = s.deploy('gastruck', 0, 0)!;
+    s.setForce(1);
     s.orderAbility(truck.id, 5, 10);
     s.step(1 / 30);
     expect(s.gasClouds.some((g) => Math.hypot(g.x - 5, g.z - 10) < 1)).toBe(true);
@@ -129,17 +139,6 @@ describe('unidades rediseñadas', () => {
     run(s, PREP_TIME + 40);
     expect(t.integrity).toBeLessThan(t.maxIntegrity);
     expect(s.tanquetaSeconds).toBeGreaterThan(0);
-  });
-
-  it('la topadora apaga el fuego y repara barricadas cercanas', () => {
-    const s = sim();
-    const b = s.deploy('barricade', 0, 4)!;
-    s.deploy('bulldozer', 0, 0);
-    b.integrity = 100;
-    s.fires.push({ kind: 'tire', x: 1, z: 1, r: 1.6, life: 10 });
-    run(s, 2);
-    expect(s.fires.length).toBe(0);
-    expect(b.integrity).toBeGreaterThan(100);
   });
 
   it('el equipo de captura se queda en su sitio si no hay líderes cerca', () => {

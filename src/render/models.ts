@@ -31,7 +31,7 @@ export const MODEL_MOLOTOV = 6;
 export const MODEL_ESCUDERO = 7;
 export const MODEL_PRENSA = 8;
 export const MODEL_MEDICO = 9;
-export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker' | 'rotor';
+export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker';
 
 /** Material compartido por todos los modelos voxel (el color va en los vértices). */
 export const VOXEL_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -45,8 +45,11 @@ export interface Gear {
   mask: boolean;
   poly: boolean;
   bat: boolean;
-  /** Fusil AK a la vista (solo con armamento pesado y mano dura). */
-  rifle: boolean;
+  /** Pistola en la mano (toda la policía, con «Mano dura»). */
+  pistol: boolean;
+  /** Barricadas: muro de concreto (nivel 2) y con pinchos (nivel 3). */
+  concrete: boolean;
+  spikes: boolean;
 }
 
 export function gearFrom(upgrades: readonly string[], lethal: boolean): Gear {
@@ -55,14 +58,26 @@ export function gearFrom(upgrades: readonly string[], lethal: boolean): Gear {
     mask: upgrades.includes('mascaras'),
     poly: upgrades.includes('policarbonato'),
     bat: upgrades.includes('bate'),
-    rifle: lethal && upgrades.includes('fusiles'),
+    pistol: lethal,
+    concrete: upgrades.includes('concreto'),
+    spikes: upgrades.includes('pinchos'),
   };
 }
 
-/** Modelo de una unidad teniendo en cuenta su equipo (antidisturbios y muro de escudos cambian de aspecto). */
+/** Modelo de una unidad teniendo en cuenta su equipo (antidisturbios, muro de escudos y barricada cambian de aspecto). */
 export function getUnitModel(type: UnitType, gear: Gear): THREE.BufferGeometry {
+  if (type === 'barricade') {
+    if (!gear.concrete) return getModel(type);
+    const key = `barricade|${gear.spikes ? 's' : ''}`;
+    let geometry = gearCache.get(key);
+    if (!geometry) {
+      geometry = concreteBarricadeModel(gear.spikes);
+      gearCache.set(key, geometry);
+    }
+    return geometry;
+  }
   if (type !== 'soldier' && type !== 'shield') return getModel(type);
-  const key = `${type}|${gear.visor ? 'v' : ''}${gear.mask ? 'm' : ''}${gear.poly ? 'p' : ''}${gear.bat ? 'b' : ''}${gear.rifle ? 'r' : ''}`;
+  const key = `${type}|${gear.visor ? 'v' : ''}${gear.mask ? 'm' : ''}${gear.poly ? 'p' : ''}${gear.bat ? 'b' : ''}${gear.pistol ? 'g' : ''}`;
   let geometry = gearCache.get(key);
   if (!geometry) {
     geometry = type === 'soldier' ? soldierGearModel(gear) : shieldWallGearModel(gear);
@@ -115,12 +130,6 @@ function buildModel(key: ModelKey): THREE.BufferGeometry {
       return negotiatorModel();
     case 'gastruck':
       return gastruckModel();
-    case 'bulldozer':
-      return bulldozerModel();
-    case 'helicopter':
-      return helicopterModel();
-    case 'rotor':
-      return rotorModel();
     case 'supply':
       return supplyModel();
     case 'army':
@@ -131,6 +140,12 @@ function buildModel(key: ModelKey): THREE.BufferGeometry {
       return shieldWallModel();
     case 'barricade':
       return barricadeModel();
+    case 'k9':
+      return k9Model();
+    case 'sniper':
+      return sniperModel();
+    case 'colectivo':
+      return colectivoModel();
     case 'ballena':
       return ballenaModel();
     case 'tanqueta':
@@ -192,6 +207,10 @@ function leaderModel(): THREE.BufferGeometry {
   b.box(5, 3, 1, 5, 12, 1, 0x8b5a2b); // palo
   b.box(2, 10, 1, 8, 13, 1, 0xfafafa); // pancarta
   b.box(3, 12, 1, 7, 12, 1, 0xdc2626).box(3, 11, 1, 6, 11, 1, 0xdc2626);
+  // Megáfono en la otra mano, a la altura de la boca: se le reconoce de lejos.
+  b.box(-1, 6, 1, -1, 7, 2, 0xfacc15);
+  b.box(-2, 6, 3, -1, 8, 3, 0xfde047);
+  b.set(-1, 7, 4, 0xfde047).set(-2, 7, 4, 0xfde047);
   return b.build({ size: PERSON_SIZE, center: true });
 }
 
@@ -247,12 +266,9 @@ function soldierGearModel(g: Gear): THREE.BufferGeometry {
     b.box(-2, 2, 2, 1, 6, 2, 0xcbd5e1); // escudo pequeño
     b.box(-2, 4, 2, 1, 4, 2, 0xfacc15);
   }
-  if (g.rifle) {
-    b.box(4, 4, 1, 4, 4, 6, 0x1f2937); // fusil AK
-    b.box(4, 3, 0, 4, 4, 0, 0x92400e); // culata de madera
-    b.box(4, 4, 3, 4, 4, 4, 0x92400e); // guardamanos
-    b.box(4, 2, 3, 4, 3, 3, 0x111111); // cargador curvo
-    b.set(4, 2, 4, 0x111111);
+  if (g.pistol) {
+    b.box(4, 4, 1, 4, 4, 4, 0x1f2937); // pistola, brazo extendido
+    b.box(4, 3, 2, 4, 3, 2, 0x111111); // empuñadura
   } else if (g.bat) {
     b.box(4, 0, 1, 4, 4, 1, 0xb45309); // bate
     b.box(4, 5, 1, 4, 6, 1, 0xd97706);
@@ -270,7 +286,30 @@ function shieldWallGearModel(g: Gear): THREE.BufferGeometry {
   b.box(-2, 5, 2, 17, 5, 2, g.poly ? 0x1e3a8a : 0xfacc15);
   for (const x of [3, 9, 15]) b.box(x, 1, 2, x, g.poly ? 8 : 7, 2, 0x8a99ab);
   if (g.visor) for (const ox of [0, 6, 12]) b.box(ox + 1, g.poly ? 9 : 8, 2, ox + 2, g.poly ? 9 : 8, 2, 0x93c5fd);
+  if (g.pistol) for (const ox of [0, 6, 12]) b.box(ox + 3, 7, 3, ox + 3, 7, 4, 0x1f2937); // pistolas asomando
   return b.build({ size: PERSON_SIZE, center: true });
+}
+
+/** Barricada nivel 2 (concreto, misma altura) y nivel 3 (con pinchos encima). */
+function concreteBarricadeModel(spikes: boolean): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  b.box(0, 0, 0, 15, 1, 3, 0x6b7280); // zócalo
+  for (let x = 0; x <= 15; x++) {
+    for (let y = 2; y <= 6; y++) {
+      const seam = x % 4 === 3 || y === 4;
+      b.box(x, y, 1, x, y, 2, seam ? 0x8b9099 : 0xa8adb5);
+    }
+  }
+  b.box(0, 3, 1, 15, 3, 1, 0xf5c518); // franja reflectante
+  if (spikes) {
+    for (let x = 0; x <= 15; x += 2) {
+      b.set(x, 7, 1, 0x4b5563).set(x, 8, 1, 0x9ca3af); // pinchos de acero
+      b.set(x + 1, 7, 2, 0x4b5563).set(x + 1, 8, 2, 0x9ca3af);
+    }
+  } else {
+    b.set(0, 7, 1, 0xef4444).set(15, 7, 1, 0xef4444); // luces
+  }
+  return b.build({ size: 0.25, center: true });
 }
 
 function shieldWallModel(): THREE.BufferGeometry {
@@ -416,44 +455,6 @@ function supplyModel(): THREE.BufferGeometry {
   return b.build({ size: 0.25, center: true });
 }
 
-function bulldozerModel(): THREE.BufferGeometry {
-  const b = new VoxelBuilder();
-  const YELLOW = 0xeab308;
-  b.box(-1, 0, 1, 0, 2, 14, 0x1f2937).box(9, 0, 1, 10, 2, 14, 0x1f2937); // orugas
-  b.box(1, 2, 1, 8, 5, 12, YELLOW);
-  b.box(2, 6, 3, 7, 10, 8, YELLOW); // cabina
-  b.box(3, 8, 8, 6, 9, 8, 0x5aa0d8);
-  b.box(-2, 0, 16, 11, 5, 17, 0x9ca3af); // pala
-  b.box(-2, 0, 17, 11, 0, 17, 0x6b7280);
-  b.box(3, 3, 13, 6, 4, 15, 0x374151);
-  b.box(7, 11, 4, 7, 12, 4, 0xf97316); // baliza
-  return b.build({ size: 0.25, center: true });
-}
-
-function helicopterModel(): THREE.BufferGeometry {
-  const b = new VoxelBuilder();
-  const BODY = 0x1e3a5f;
-  b.box(0, 2, 4, 5, 6, 13, BODY); // fuselaje
-  b.box(1, 4, 13, 4, 6, 15, 0x5aa0d8); // cabina acristalada
-  b.box(2, 4, -6, 3, 5, 3, BODY); // cola
-  b.box(2, 5, -7, 3, 8, -6, BODY);
-  b.box(1, 7, -7, 4, 7, -7, 0xfacc15);
-  b.box(-1, 0, 5, -1, 0, 12, 0x111111).box(6, 0, 5, 6, 0, 12, 0x111111); // patines
-  b.box(-1, 1, 6, -1, 1, 6, 0x374151).box(6, 1, 6, 6, 1, 6, 0x374151);
-  b.box(2, 7, 8, 3, 7, 9, 0x374151); // mástil del rotor
-  b.box(2, 1, 12, 3, 1, 13, 0xfef08a); // reflector
-  b.box(0, 4, 8, 0, 4, 10, 0xf8fafc).box(5, 4, 8, 5, 4, 10, 0xf8fafc);
-  return b.build({ size: 0.3, center: true });
-}
-
-function rotorModel(): THREE.BufferGeometry {
-  const b = new VoxelBuilder();
-  b.box(-14, 0, 0, 14, 0, 0, 0x27272a);
-  b.box(0, 0, -14, 0, 0, 14, 0x27272a);
-  return b.build({ size: 0.3, center: true, jitter: 0 });
-}
-
-
 function barricadeModel(): THREE.BufferGeometry {
   const b = new VoxelBuilder();
   b.box(0, 0, 0, 15, 1, 3, 0x9a9a9a);
@@ -566,4 +567,52 @@ function markerModel(): THREE.BufferGeometry {
   b.box(-1, 2, 0, 1, 2, 0, 0xf97316).box(0, 2, -1, 0, 2, 1, 0xf97316);
   b.box(0, 3, 0, 0, 3, 0, 0xfacc15).box(0, 4, 0, 0, 4, 0, 0xfde68a);
   return b.build({ size: 0.4, center: true, jitter: 0 });
+}
+
+/** Agente con perro policía (pastor alemán) atado con correa. */
+function k9Model(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  soldierBody(b, 0);
+  b.box(4, 3, 1, 6, 3, 1, 0x111111); // correa
+  // Perro: cuerpo, patas, cabeza y orejas.
+  const FUR = 0x8b5a2b;
+  const DARK = 0x2d1b0e;
+  b.box(6, 2, 0, 7, 3, 4, FUR);
+  b.box(6, 3, 1, 7, 3, 3, DARK); // lomo oscuro
+  for (const z of [0, 4]) b.box(6, 0, z, 6, 1, z, DARK).box(7, 0, z, 7, 1, z, DARK);
+  b.box(6, 3, 5, 7, 4, 6, FUR); // cabeza
+  b.set(6, 3, 7, DARK).set(7, 3, 7, DARK); // hocico
+  b.set(6, 5, 5, DARK).set(7, 5, 5, DARK); // orejas
+  b.set(6, 3, -1, FUR); // cola
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+/** Francotirador tumbado en la azotea, con fusil de precisión. */
+function sniperModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  const CAMO = 0x1f2937;
+  b.box(0, 0, 0, 3, 1, 6, CAMO); // cuerpo tumbado
+  b.box(1, 1, 6, 2, 2, 7, 0xe0ac69); // cabeza
+  b.box(1, 2, 6, 2, 2, 7, 0x111111); // gorra
+  b.box(2, 1, 7, 2, 1, 12, 0x111111); // cañón largo
+  b.box(2, 2, 8, 2, 2, 9, 0x374151); // mira telescópica
+  b.box(1, 0, 10, 1, 0, 10, 0x111111).box(3, 0, 10, 3, 0, 10, 0x111111); // bípode
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+/** Colectivo: civil con casco abierto y bate en una moto sin distintivos. */
+function colectivoModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  b.box(1, 0, 0, 2, 2, 1, 0x111111).box(1, 0, 8, 2, 2, 9, 0x111111); // ruedas
+  b.box(1, 2, 1, 2, 3, 8, 0x7f1d1d); // chasis rojo
+  b.box(0, 3, 6, 3, 4, 8, 0x27272a);
+  b.set(1, 4, 9, 0xfde047);
+  // Piloto: camiseta roja del partido, pañuelo y casco abierto.
+  b.box(1, 4, 3, 2, 6, 4, 0xb91c1c);
+  b.box(0, 5, 4, 3, 6, 5, 0xb91c1c);
+  b.box(1, 7, 3, 2, 7, 4, 0x111111); // pañuelo
+  b.box(1, 8, 3, 2, 9, 4, 0xe0ac69);
+  b.box(1, 10, 3, 2, 10, 4, 0x3f3f46); // casco
+  b.box(4, 5, 3, 4, 9, 3, 0x92400e); // bate en alto
+  return b.build({ size: 0.22, center: true });
 }

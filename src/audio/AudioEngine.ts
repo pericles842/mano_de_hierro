@@ -230,6 +230,15 @@ export class AudioEngine {
           this.play('rifle');
           break;
         case 'openFire':
+        case 'flash':
+          this.play('rifle');
+          break;
+        case 'pepper':
+          this.play('spray');
+          break;
+        case 'jam':
+          this.play('alarm');
+          break;
         case 'martyr':
         case 'soldierDown':
           this.play('alarm');
@@ -255,7 +264,6 @@ export class AudioEngine {
           break;
         case 'deployed':
           if (e.unitType === 'ballena' || e.unitType === 'tanqueta' || e.unitType === 'gastruck') this.play('siren');
-          else if (e.unitType === 'helicopter') this.play('rotor');
           break;
         case 'disperse':
         case 'rescue':

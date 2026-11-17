@@ -4,7 +4,8 @@ import { Random } from './core/Random';
 import type { Screen } from './core/Screen';
 import { DICTATOR } from './data/country';
 import { DIPLOMACY, type DiplomacyAction, type DiplomacyId } from './data/diplomacy';
-import { RIOTS } from './data/riots';
+import { RIOTS, type RiotDef } from './data/riots';
+import { UNIT_ORDER, type UnitType } from './data/units';
 import { NewsFeed, riotAftermath } from './news/NewsFeed';
 import { CountryScreen } from './screens/CountryScreen';
 import { RiotScreen } from './screens/RiotScreen';
@@ -12,9 +13,11 @@ import {
   applyEventOption,
   applyRiotResult,
   checkStatus,
+  consumeGadgetCharges,
   createRegime,
   devUnlock,
   endDay,
+  gadgetUsesFor,
   releasePrisoners,
   rollEvent,
   setPayLevel,
@@ -22,13 +25,14 @@ import {
   type RegimeState,
   type RiotInstance,
 } from './sim/regime';
-import { RiotSim } from './sim/riot/RiotSim';
+import { PLANNING_TIME, RiotSim } from './sim/riot/RiotSim';
 import type { RiotResult } from './sim/riot/types';
 import { Hud } from './ui/Hud';
 import { NewsTicker } from './ui/NewsTicker';
 import { h } from './ui/dom';
 import {
   fillNames,
+  showModal,
   showDayReport,
   showEvent,
   showGameOver,
@@ -81,10 +85,14 @@ export class Game {
   start(): void {
     this.loop.start();
     this.showCountry();
-    showSetup(this.uiRoot, this.regime, (names) => {
+    showSetup(this.uiRoot, this.regime, (names, tutorial) => {
       this.regime.rulerName = names.rulerName;
       this.regime.cityName = names.cityName;
       this.news.refresh(this.regime);
+      if (tutorial) {
+        this.startTutorial();
+        return;
+      }
       this.news.pushBreaking({
         text: `${DICTATOR.title} ${names.rulerName} asume el poder (otra vez) en un emotivo acto en ${names.cityName}.`,
         source: 'oficial',
@@ -191,6 +199,8 @@ export class Game {
       unrest: this.regime.unrest,
       upgrades: this.regime.upgrades,
       seed: this.rng.int(1, 1e9),
+      planning: PLANNING_TIME,
+      gadgets: gadgetUsesFor(this.regime),
     });
     if (this.devMode) sim.devUnlockAll();
     this.hud.setVisible(false);
@@ -214,8 +224,67 @@ export class Game {
     );
   }
 
+  /**
+   * Tutorial: una manifestación pacífica y pequeña, con tropas prestadas y preparación sin límite.
+   * No cuenta para la partida: ni gasta el día ni cambia el régimen.
+   */
+  private startTutorial(): void {
+    const def: RiotDef = {
+      ...RIOTS.cacerolazo,
+      name: 'Manifestación de práctica',
+      region: 'Tutorial',
+      protesters: 40,
+      radicalShare: 0,
+      leaders: 1,
+      aggression: 0,
+      duration: 75,
+      spawns: ['sur'],
+      intlSensitivity: 0,
+    };
+    const stock = Object.fromEntries(UNIT_ORDER.map((t) => [t, 0])) as Record<UnitType, number>;
+    Object.assign(stock, { soldier: 10, shield: 2, barricade: 4, negotiator: 1 });
+    const sim = new RiotSim({ def, scale: 1, stock, loyalty: 90, unrest: 0, seed: this.rng.int(1, 1e9), planning: Infinity });
+    this.hud.setVisible(false);
+    this.ticker.setMode('riot');
+    this.setScreen(
+      new RiotScreen({
+        renderer: this.renderer,
+        uiRoot: this.uiRoot,
+        sim,
+        loop: this.loop,
+        cityName: this.regime.cityName,
+        news: this.news,
+        devMode: false,
+        tutorial: true,
+        onDevToggle: () => false,
+        onFinished: (result) => {
+          this.showCountry();
+          showModal(
+            this.uiRoot,
+            result.won ? '¡Tutorial completado!' : 'Casi lo consigues',
+            [
+              h('p', {
+                text: result.won
+                  ? 'Ya sabes mover la cámara, colocar y mover tropas y poner barricadas. Ahora te toca gobernar de verdad: elige qué revuelta sofocar en el despacho.'
+                  : 'La multitud llegó al palacio. Prueba a cortarles el paso con barricadas y una hilera de antidisturbios.',
+              }),
+            ],
+            result.won
+              ? [{ label: 'Al despacho', primary: true }]
+              : [
+                  { label: 'Ir al despacho' },
+                  { label: 'Repetir el tutorial', primary: true, onClick: () => this.startTutorial() },
+                ],
+            result.won ? 'win' : 'lose',
+          );
+        },
+      }),
+    );
+  }
+
   private onRiotFinished(riot: RiotInstance, result: RiotResult): void {
     const def = RIOTS[riot.defId];
+    if (!this.devMode) consumeGadgetCharges(this.regime, result.gadgetsUsed);
     if (!result.won) {
       // Perder la protesta no cuesta el día: reintentar es gratis. El día solo avanza si el jugador lo fuerza.
       this.showCountry();
