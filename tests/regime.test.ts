@@ -28,6 +28,13 @@ const result = (over: Partial<RiotResult>): RiotResult => ({
   armyDeployed: 0,
   deserted: 0,
   harshness: 0,
+  palaceFallen: false,
+  occupiedSeconds: 0,
+  deaths: 0,
+  injured: 0,
+  leadersKilled: 0,
+  soldiersKilled: 0,
+  tanquetaSeconds: 0,
   ...over,
 });
 

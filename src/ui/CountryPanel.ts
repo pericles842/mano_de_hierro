@@ -1,6 +1,6 @@
 import { DICTATOR } from '../data/country';
 import { CROWD_STAGES, stageForAnger } from '../data/crowdStages';
-import { DIPLOMACY, diplomacyBlocked, type DiplomacyAction } from '../data/diplomacy';
+import { DIPLOMACY, diplomacyBlocked, internationalStatus, type DiplomacyAction } from '../data/diplomacy';
 import { RIOTS } from '../data/riots';
 import { BUYABLE_UNITS, CATEGORY_NAMES, UNITS, UNIT_ORDER, type UnitCategory } from '../data/units';
 import { UPGRADES, UPGRADE_ORDER, type UpgradeId } from '../data/upgrades';
@@ -27,6 +27,7 @@ export interface CountryPanelHandlers {
   onChange(): void;
   onEmergency(): void;
   onDiplomacy(action: DiplomacyAction): void;
+  onRelease(): void;
   onSelectRiot(uid: number): void;
   onSkipDay(): void;
 }
@@ -300,8 +301,8 @@ export class CountryPanel {
   private diplomacyTab(): Node[] {
     const s = this.state;
     const sanctions = sanctionsFactor(s);
-    const status =
-      s.intlPressure > 60 ? '🔴 Paria internacional' : s.intlPressure > 35 ? '🟠 Bajo sanciones' : s.intlPressure > 15 ? '🟡 Bajo vigilancia' : '🟢 Respetable (casi)';
+    const st = internationalStatus(s.intlPressure);
+    const status = `${st.icon} ${st.name}`;
     const actions = DIPLOMACY.map((a) => {
       const used = s.diplomacyUsed.includes(a.id);
       const blocked = diplomacyBlocked(a, s.intlPressure);
@@ -332,6 +333,20 @@ export class CountryPanel {
         tile('Estatus', status),
       ]),
       sanctions < 1 ? h('div', { class: 'cp-alert', text: `Las sanciones recortan tus ingresos un ${Math.round((1 - sanctions) * 100)}%.` }) : null,
+      section(
+        'Presos políticos',
+        'Tu moneda de cambio con el exterior. Sin presos, el exterior no tiene nada que pedirte... ni nada que temer. Pero cada día que siguen presos sube la presión.',
+        [
+          h('div', { class: 'cp-card' }, [
+            h('span', { class: 'cp-card-icon', text: '⛓️' }),
+            h('div', { class: 'cp-card-main' }, [
+              h('div', { class: 'cp-card-title', text: `${s.prisoners} presos` }),
+              h('div', { class: 'cp-card-desc', text: s.prisoners > 0 ? `Coste diario: presión +${Math.min(8, s.prisoners * 0.15).toFixed(1)}, molestia +${Math.min(5, s.prisoners * 0.1).toFixed(1)}` : 'Los equipos de captura arrestan líderes durante las revueltas.' }),
+            ]),
+            h('button', { class: 'btn small', text: 'Liberar…', disabled: s.prisoners <= 0, onClick: () => this.handlers.onRelease() }),
+          ]),
+        ],
+      ),
       section('Acciones diplomáticas', 'Cada acción se puede usar una vez por día.', actions),
     ].filter((n): n is HTMLElement => n !== null);
   }

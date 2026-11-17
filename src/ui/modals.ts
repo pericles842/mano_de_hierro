@@ -3,7 +3,7 @@ import { CROWD_STAGES } from '../data/crowdStages';
 import type { EventOption, GameEventDef } from '../data/events';
 import { FORCE_LEVELS } from '../data/forceLevels';
 import type { RiotDef } from '../data/riots';
-import type { DayReport, Deltas, PlayerNames, RegimeState } from '../sim/regime';
+import { releaseEffects, type DayReport, type Deltas, type PlayerNames, type RegimeState, type ReleaseMode } from '../sim/regime';
 import type { RiotResult } from '../sim/riot/types';
 import { h, money, signed } from './dom';
 
@@ -135,11 +135,22 @@ export function showDayReport(
           ? result.reason === 'cleared'
             ? 'La plaza quedó vacía. La TV estatal emite dibujos animados.'
             : 'Los manifestantes se cansaron y se fueron a casa. Por hoy.'
-          : 'Los manifestantes ocuparon la escalinata. Tuviste que esconderte en el armario de los trajes de gala.',
+          : `El palacio terminó en manos de los manifestantes tras ${Math.round(result.occupiedSeconds)} s de ocupación. Pasaste la tarde en el armario de los trajes de gala.`,
       }),
+      ...(result.won && result.palaceFallen
+        ? [h('p', { class: 'hint', text: `Recuperaste el palacio, pero estuvo tomado ${Math.round(result.occupiedSeconds)} s y las imágenes dieron la vuelta al mundo.` })]
+        : []),
       h('p', {
-        text: `Dispersados: ${result.dispersed}/${result.total} · Fuerza media: ${forceName} · Peor momento: ${peak.icon} ${peak.name} · Unidades retiradas: ${result.brokenUnits}`,
+        text: `Dispersados: ${result.dispersed}/${result.total} · Fuerza media: ${forceName} · Peor momento: ${peak.icon} ${peak.name} · Arrestos: ${result.arrests} · Unidades retiradas: ${result.brokenUnits}`,
       }),
+      ...(result.deaths + result.injured + result.soldiersKilled > 0
+        ? [
+            h('p', {
+              class: 'bad',
+              text: `🩸 Muertos: ${result.deaths}${result.leadersKilled > 0 ? ` (${result.leadersKilled} líderes, ahora mártires)` : ''} · Heridos: ${result.injured} · Agentes caídos: ${result.soldiersKilled}`,
+            }),
+          ]
+        : []),
       deltaRows(riot.deltas),
     );
   }
@@ -198,6 +209,104 @@ export function showEvent(
         ]);
       },
     })),
+    'event',
+  );
+}
+
+/** Has perdido la protesta (el palacio cayó): reintentar gratis o volver al despacho sin pasar el día. */
+export function showRiotLost(
+  parent: HTMLElement,
+  def: RiotDef,
+  result: RiotResult,
+  handlers: { onRetry: () => void; onBack: () => void },
+): void {
+  showModal(
+    parent,
+    `🏛️ ${def.name}: el palacio ha caído`,
+    [
+      h('p', { text: 'Los manifestantes tomaron la escalinata del palacio. Esta protesta la has perdido... pero el día no ha terminado.' }),
+      h('p', {
+        class: 'hint',
+        text: `Aguantaste ${Math.round(result.elapsed)} s · Dispersados: ${result.dispersed}/${result.total} · Detenidos: ${result.arrests}${result.deaths > 0 ? ` · Muertos: ${result.deaths}` : ''}`,
+      }),
+      h('p', { text: 'Puedes reintentarla con otra estrategia, o volver al despacho y, si quieres, terminar el día sin intervenir (botón de la pestaña Revueltas).' }),
+    ],
+    [
+      { label: 'Volver al despacho', onClick: handlers.onBack },
+      { label: '🔁 Reintentar la protesta', primary: true, onClick: handlers.onRetry },
+    ],
+    'lose',
+  );
+}
+
+/** Elegir cuántos presos políticos liberar y cómo (gesto o canje). */
+export function showReleasePrisoners(
+  parent: HTMLElement,
+  state: RegimeState,
+  onConfirm: (count: number, mode: ReleaseMode) => Deltas | null,
+): void {
+  if (state.prisoners <= 0) {
+    showModal(
+      parent,
+      '⛓️ Presos políticos',
+      [
+        h('p', { text: 'No tienes presos políticos. Sin esa moneda de cambio, el exterior no tiene nada que pedirte... ni nada que temer.' }),
+        h('p', { class: 'hint', text: 'Los equipos de captura arrestan líderes durante las revueltas.' }),
+      ],
+      [{ label: 'Entendido', primary: true }],
+    );
+    return;
+  }
+  let mode: ReleaseMode = 'gesto';
+  const max = state.prisoners;
+  const countLabel = h('strong', { class: 'release-count' });
+  const preview = h('div');
+  const slider = h('input', { class: 'slider', attrs: { type: 'range', min: '1', max: String(max), step: '1', value: String(Math.ceil(max / 2)) } });
+  const modeButtons = (['gesto', 'canje'] as const).map((m) =>
+    h('button', {
+      class: 'chip',
+      text: m === 'gesto' ? '🕊️ Gesto de buena voluntad' : '💰 Canje por ayuda exterior',
+      onClick: () => {
+        mode = m;
+        update();
+      },
+    }),
+  );
+  const update = (): void => {
+    const n = Number(slider.value);
+    countLabel.textContent = `${n} de ${max}`;
+    modeButtons.forEach((b, i) => b.classList.toggle('active', (i === 0 ? 'gesto' : 'canje') === mode));
+    preview.replaceChildren(deltaRows(releaseEffects(n, mode)));
+  };
+  slider.addEventListener('input', update);
+  update();
+
+  showModal(
+    parent,
+    '⛓️ Liberar presos políticos',
+    [
+      h('p', { text: `Tienes ${max} presos políticos. Son tu mejor moneda de cambio con el exterior, pero mantenerlos encerrados sube cada día la presión internacional y la molestia social.` }),
+      h('div', { class: 'chips wrap' }, modeButtons),
+      h('div', { class: 'cp-row' }, [h('span', { text: '¿Cuántos liberar?' }), countLabel]),
+      slider,
+      h('h3', { text: 'Consecuencias' }),
+      preview,
+    ],
+    [
+      { label: 'Cancelar' },
+      {
+        label: 'Liberar',
+        primary: true,
+        onClick: () => {
+          const deltas = onConfirm(Number(slider.value), mode);
+          if (deltas) {
+            showModal(parent, '⛓️ Presos liberados', [h('p', { text: mode === 'canje' ? 'El canje se cierra en un aeropuerto discreto. Llega la ayuda.' : 'Las familias celebran a las puertas de la cárcel. El mundo aplaude.' }), deltaRows(deltas)], [
+              { label: 'Continuar', primary: true },
+            ]);
+          }
+        },
+      },
+    ],
     'event',
   );
 }

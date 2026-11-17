@@ -37,6 +37,39 @@ export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'mar
 export const VOXEL_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: true });
 
 const cache = new Map<ModelKey, THREE.BufferGeometry>();
+const gearCache = new Map<string, THREE.BufferGeometry>();
+
+/** Equipo visible de los antidisturbios según las mejoras compradas. */
+export interface Gear {
+  visor: boolean;
+  mask: boolean;
+  poly: boolean;
+  bat: boolean;
+  /** Fusil AK a la vista (solo con armamento pesado y mano dura). */
+  rifle: boolean;
+}
+
+export function gearFrom(upgrades: readonly string[], lethal: boolean): Gear {
+  return {
+    visor: upgrades.includes('cascos'),
+    mask: upgrades.includes('mascaras'),
+    poly: upgrades.includes('policarbonato'),
+    bat: upgrades.includes('bate'),
+    rifle: lethal && upgrades.includes('fusiles'),
+  };
+}
+
+/** Modelo de una unidad teniendo en cuenta su equipo (antidisturbios y muro de escudos cambian de aspecto). */
+export function getUnitModel(type: UnitType, gear: Gear): THREE.BufferGeometry {
+  if (type !== 'soldier' && type !== 'shield') return getModel(type);
+  const key = `${type}|${gear.visor ? 'v' : ''}${gear.mask ? 'm' : ''}${gear.poly ? 'p' : ''}${gear.bat ? 'b' : ''}${gear.rifle ? 'r' : ''}`;
+  let geometry = gearCache.get(key);
+  if (!geometry) {
+    geometry = type === 'soldier' ? soldierGearModel(gear) : shieldWallGearModel(gear);
+    gearCache.set(key, geometry);
+  }
+  return geometry;
+}
 
 /** Geometrías cacheadas y compartidas: NO se deben liberar con dispose() al cambiar de escena. */
 export function getModel(key: ModelKey): THREE.BufferGeometry {
@@ -196,6 +229,47 @@ function soldierModel(): THREE.BufferGeometry {
   b.box(-2, 2, 2, 1, 6, 2, 0xcbd5e1); // escudo
   b.box(-2, 4, 2, 1, 4, 2, 0xfacc15);
   b.box(4, 0, 1, 4, 2, 1, 0x111111); // porra
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function soldierGearModel(g: Gear): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  soldierBody(b, 0);
+  if (g.visor) b.box(1, 7, 2, 2, 8, 2, 0x93c5fd); // visera
+  if (g.mask) {
+    b.box(1, 6, 2, 2, 6, 2, 0x166534); // máscara antigás
+    b.set(1, 6, 3, 0x111111).set(2, 6, 3, 0x111111);
+  }
+  if (g.poly) {
+    b.box(-2, 1, 2, 1, 7, 2, 0xbfe3ff); // escudo grande de policarbonato
+    b.box(-2, 6, 2, 1, 6, 2, 0x1e3a8a);
+  } else {
+    b.box(-2, 2, 2, 1, 6, 2, 0xcbd5e1); // escudo pequeño
+    b.box(-2, 4, 2, 1, 4, 2, 0xfacc15);
+  }
+  if (g.rifle) {
+    b.box(4, 4, 1, 4, 4, 6, 0x1f2937); // fusil AK
+    b.box(4, 3, 0, 4, 4, 0, 0x92400e); // culata de madera
+    b.box(4, 4, 3, 4, 4, 4, 0x92400e); // guardamanos
+    b.box(4, 2, 3, 4, 3, 3, 0x111111); // cargador curvo
+    b.set(4, 2, 4, 0x111111);
+  } else if (g.bat) {
+    b.box(4, 0, 1, 4, 4, 1, 0xb45309); // bate
+    b.box(4, 5, 1, 4, 6, 1, 0xd97706);
+  } else {
+    b.box(4, 0, 1, 4, 2, 1, 0x111111); // porra
+  }
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function shieldWallGearModel(g: Gear): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  for (const ox of [0, 6, 12]) soldierBody(b, ox);
+  const shield = g.poly ? 0xd6ecff : 0xb6c3d1;
+  b.box(-2, 1, 2, 17, g.poly ? 8 : 7, 2, shield);
+  b.box(-2, 5, 2, 17, 5, 2, g.poly ? 0x1e3a8a : 0xfacc15);
+  for (const x of [3, 9, 15]) b.box(x, 1, 2, x, g.poly ? 8 : 7, 2, 0x8a99ab);
+  if (g.visor) for (const ox of [0, 6, 12]) b.box(ox + 1, g.poly ? 9 : 8, 2, ox + 2, g.poly ? 9 : 8, 2, 0x93c5fd);
   return b.build({ size: PERSON_SIZE, center: true });
 }
 

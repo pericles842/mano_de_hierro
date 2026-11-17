@@ -12,6 +12,7 @@ import type { RiotSim } from '../sim/riot/RiotSim';
 import type { RiotResult, Unit } from '../sim/riot/types';
 import { RiotHud } from '../ui/RiotHud';
 import { h } from '../ui/dom';
+import { showModal } from '../ui/modals';
 
 export interface RiotScreenOptions {
   renderer: THREE.WebGLRenderer;
@@ -20,6 +21,9 @@ export interface RiotScreenOptions {
   loop: GameLoop;
   cityName: string;
   news: NewsFeed;
+  devMode: boolean;
+  /** Cambia el modo developer y devuelve si quedó activo. */
+  onDevToggle(): boolean;
   onFinished(result: RiotResult): void;
 }
 
@@ -70,7 +74,7 @@ export class RiotScreen implements Screen {
     this.camera = new RtsCamera(this.view.camera, this.canvas, { minX: -35, maxX: 35, minZ: -26, maxZ: 40 });
     this.hud = new RiotHud(o.uiRoot, o.sim, o.cityName, {
       onCardPress: (type) => this.pressCard(type),
-      onForce: (level) => this.sim.setForce(level),
+      onForce: (level) => this.requestForce(level),
       onSpeed: (speed) => {
         o.loop.speed = speed;
         o.loop.paused = false;
@@ -79,7 +83,16 @@ export class RiotScreen implements Screen {
         o.loop.paused = !o.loop.paused;
       },
       onMute: () => audio.toggleMute(),
+      onDev: () => {
+        const on = o.onDevToggle();
+        if (on) {
+          this.sim.devUnlockAll();
+          this.hud.toast('🛠 Modo developer: todas las tropas desbloqueadas', 'neutral');
+        }
+        this.hud.setDev(on);
+      },
     });
+    this.hud.setDev(o.devMode);
     this.cursorTip = h('div', { class: 'cursor-tip', style: 'display:none' });
     this.selectBox = h('div', { class: 'select-box', style: 'display:none' });
     o.uiRoot.append(this.cursorTip, this.selectBox);
@@ -111,6 +124,16 @@ export class RiotScreen implements Screen {
         this.hud.toast('🪖 ¡Soldados desertan y se unen a la multitud!', 'bad');
       } else if (e.type === 'press') {
         this.hud.toast('📸 La prensa lo grabó todo: sube la presión internacional', 'bad');
+      } else if (e.type === 'surge') {
+        this.hud.toast('🏃 ¡La multitud se avalancha hacia el palacio!', 'bad');
+      } else if (e.type === 'regroup') {
+        this.hud.toast('📣 La multitud se repliega y vuelve a protestar en la plaza', 'good');
+      } else if (e.type === 'openFire') {
+        this.hud.toast(e.by === 'army' ? '🪖 El ejército abre fuego real' : '☠️ La policía dispara a matar', 'bad');
+      } else if (e.type === 'martyr') {
+        this.hud.toast('🕯️ Han matado a un líder: la multitud enloquece', 'bad');
+      } else if (e.type === 'soldierDown') {
+        this.hud.toast(`🩸 ${UNITS[e.unitType].name}: agentes caídos`, 'bad');
       }
       if (e.type === 'escalate') {
         const s = CROWD_STAGES[e.stage];
@@ -129,7 +152,7 @@ export class RiotScreen implements Screen {
       this.finishTimer = 2.5;
       this.disarm();
       audio.play(won ? 'win' : 'lose');
-      this.hud.showBanner(won ? '¡Revuelta sofocada!' : '¡Han tomado el palacio!', won ? 'win' : 'lose');
+      this.hud.showBanner(won ? '¡Revuelta sofocada!' : 'El palacio quedó en sus manos', won ? 'win' : 'lose');
     }
   }
 
@@ -308,11 +331,80 @@ export class RiotScreen implements Screen {
     for (const u of pick) this.selected.add(u.id);
   }
 
+  /**
+   * Mano dura = fuego real. Antes de ordenarlo, una alerta obligatoria:
+   * es una contramedida extrema con muertos y derechos humanos suspendidos.
+   */
+  private requestForce(level: number): void {
+    if (level < 3 || this.sim.forceLevel === 3) {
+      this.sim.setForce(level);
+      return;
+    }
+    const loop = this.o.loop;
+    const wasPaused = loop.paused;
+    loop.paused = true;
+    audio.play('alarm');
+    showModal(
+      this.o.uiRoot,
+      '⚠️ Orden de fuego real',
+      [
+        h('p', {
+          text: 'Vas a ordenar «Mano dura». Los antidisturbios dispararán munición letal (escopetas y, si tienes armamento pesado, fusiles AK). El ejército, si está en la calle, también disparará a matar.',
+        }),
+        h('p', {
+          text: 'Habrá muertos y heridos. Los derechos humanos quedan suspendidos: la presión internacional, la molestia social y el riesgo de deserciones y golpe de Estado se dispararán. Cada muerte cerca de la prensa dará la vuelta al mundo.',
+        }),
+        h('p', { class: 'hint', text: 'Puedes volver a un nivel inferior en cualquier momento (teclas 1-3).' }),
+      ],
+      [
+        {
+          label: 'Cancelar',
+          onClick: () => {
+            loop.paused = wasPaused;
+          },
+        },
+        {
+          label: '☠️ Ordenar fuego real',
+          primary: true,
+          onClick: () => {
+            this.sim.setForce(3);
+            loop.paused = wasPaused;
+            this.hud.toast('☠️ Fuego real autorizado', 'bad');
+          },
+        },
+      ],
+      'lose',
+    );
+  }
+
+  /** Tecla F: los camiones lanzagás seleccionados disparan su próxima salva donde está el ratón. */
+  private gasTruckAbility(): void {
+    if (!this.mouse) return;
+    const p = this.groundPoint(this.mouse);
+    if (!p) return;
+    let ordered = 0;
+    for (const u of this.selectedUnits()) if (this.sim.orderAbility(u.id, p.x, p.z)) ordered++;
+    if (ordered > 0) {
+      this.view.showMoveMarker(p.x, p.z);
+      this.hud.toast(`🚚 Salva de gas ordenada (${ordered})`, 'neutral');
+    }
+  }
+
   /** Mueve el grupo manteniendo la formación relativa alrededor del punto indicado. */
   private moveSelection(screen: Point): void {
-    const units = this.selectedUnits().filter((u) => UNITS[u.type].speed > 0);
     const p = this.groundPoint(screen);
-    if (units.length === 0 || !p) return;
+    if (!p) return;
+    // Clic derecho sobre un líder con equipos de captura seleccionados: arrestarlo.
+    const captures = this.selectedUnits().filter((u) => u.type === 'capture');
+    const leader = captures.length > 0 ? this.sim.leaderAt(p.x, p.z, 2) : null;
+    if (leader) {
+      for (const u of captures) this.sim.orderCapture(u.id, leader.id);
+      this.hud.toast('🕶️ Equipo de captura: a por el líder', 'neutral');
+      audio.play('click');
+      return;
+    }
+    const units = this.selectedUnits().filter((u) => UNITS[u.type].speed > 0);
+    if (units.length === 0) return;
     const cx = units.reduce((s, u) => s + u.x, 0) / units.length;
     const cz = units.reduce((s, u) => s + u.z, 0) / units.length;
     for (const u of units) this.sim.orderMove(u.id, p.x + (u.x - cx), p.z + (u.z - cz));
@@ -425,7 +517,9 @@ export class RiotScreen implements Screen {
       this.rowAngle = (this.rowAngle + Math.PI / 4) % (Math.PI * 2);
       audio.play('click');
     } else if (/^Digit[1-4]$/.test(e.code)) {
-      this.sim.setForce(Number(e.code.slice(5)) - 1);
+      this.requestForce(Number(e.code.slice(5)) - 1);
+    } else if (e.code === 'KeyF') {
+      this.gasTruckAbility();
     }
   };
 

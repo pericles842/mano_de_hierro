@@ -45,6 +45,8 @@ export interface RegimeState extends PlayerNames {
   emergency: boolean;
   /** Acciones diplomáticas ya usadas hoy. */
   diplomacyUsed: DiplomacyId[];
+  /** Presos políticos: moneda de cambio con el exterior, pero tenerlos presos también cuesta. */
+  prisoners: number;
   /** Eventos recientes, para no repetirlos seguidos. */
   recentEvents: string[];
   activeRiots: RiotInstance[];
@@ -99,6 +101,7 @@ export function createRegime(rng: Random, names: PlayerNames = DEFAULT_NAMES): R
     upgrades: [],
     emergency: false,
     diplomacyUsed: [],
+    prisoners: 0,
     recentEvents: [],
     activeRiots: [],
     status: 'playing',
@@ -127,6 +130,37 @@ export function declareEmergency(state: RegimeState): Deltas | null {
   const d = { ...EMERGENCY_COST };
   applyDeltas(state, d);
   return d;
+}
+
+export type ReleaseMode = 'gesto' | 'canje';
+
+/**
+ * Efecto de liberar presos políticos.
+ * - Gesto de buena voluntad: baja mucho la presión internacional y la molestia, pero los generales lo ven como debilidad.
+ * - Canje: los cambias por ayuda económica y algo de alivio diplomático.
+ */
+export function releaseEffects(n: number, mode: ReleaseMode): Deltas {
+  if (mode === 'canje') {
+    return { treasury: n * 45, popularity: 0, intlPressure: -n * 0.6, loyalty: -n * 0.1, unrest: -n * 0.2 };
+  }
+  return { treasury: 0, popularity: n * 0.2, intlPressure: -n * 1.2, loyalty: -n * 0.25, unrest: -n * 0.5 };
+}
+
+export function releasePrisoners(state: RegimeState, count: number, mode: ReleaseMode): Deltas | null {
+  const n = Math.floor(Math.min(count, state.prisoners));
+  if (n <= 0) return null;
+  const d = releaseEffects(n, mode);
+  state.prisoners -= n;
+  applyDeltas(state, d);
+  checkStatus(state);
+  return d;
+}
+
+/** MODO DEVELOPER (temporal): tropas y dinero de sobra para probar. */
+export function devUnlock(state: RegimeState): void {
+  for (const type of UNIT_ORDER) state.stock[type] = Math.max(state.stock[type], 30);
+  state.treasury = Math.max(state.treasury, 99999);
+  state.emergency = true;
 }
 
 /** Usa una acción diplomática (una vez por día). Devuelve los cambios, o null si no se puede. */
@@ -205,7 +239,11 @@ export function projectedUpkeep(state: RegimeState): number {
   return Math.round(total * mult);
 }
 
-/** Consecuencias de una revuelta en los indicadores del régimen. */
+/**
+ * Consecuencias de una revuelta en los indicadores del régimen.
+ * Solo se aplica cuando la revuelta termina en victoria o cuando el jugador acepta la derrota;
+ * perder el palacio permite reintentar gratis.
+ */
 export function applyRiotResult(state: RegimeState, result: RiotResult, def: RiotDef): Deltas {
   const d = zeroDeltas();
   const sens = def.intlSensitivity;
@@ -216,12 +254,28 @@ export function applyRiotResult(state: RegimeState, result: RiotResult, def: Rio
     d.treasury -= result.brokenUnits * 20;
     d.unrest += result.avgForce * 7 + result.tanquetas * 2 + result.peakStage * 2 - 5;
   } else {
-    d.popularity -= 12;
+    // Cuanto más tiempo estuvo tomado el palacio, peor.
+    const occupied = Math.min(60, result.occupiedSeconds);
+    d.popularity -= 6 + occupied * 0.15;
     d.intlPressure += result.avgForce * 3 * sens;
-    d.loyalty -= 8;
-    d.treasury -= 250;
-    d.unrest += 6 + result.avgForce * 5; // una victoria del pueblo envalentona a todos
+    d.loyalty -= 5 + occupied * 0.08;
+    d.treasury -= 120 + occupied * 4;
+    d.unrest += 5 + result.avgForce * 5 + occupied * 0.1; // una victoria del pueblo envalentona a todos
   }
+  if (result.won && result.palaceFallen) {
+    // Lo recuperaste, pero las imágenes del palacio tomado dieron la vuelta al mundo.
+    d.popularity -= 3;
+    d.loyalty -= 2;
+  }
+  // Muertos: los derechos humanos no salen gratis. Un líder asesinado se convierte en mártir.
+  if (result.deaths > 0) {
+    d.intlPressure += (result.deaths * 1.2 + result.leadersKilled * 3 + (result.deaths >= 10 ? 10 : 0)) * sens;
+    d.unrest += result.deaths * 0.7 + result.leadersKilled * 3;
+    d.popularity -= result.deaths * 0.35 + result.leadersKilled;
+  }
+  d.loyalty -= result.soldiersKilled * 1.5; // las tropas no quieren morir por ti
+  d.intlPressure += result.tanquetaSeconds * 0.03 * sens;
+  state.prisoners += result.arrests;
   // Métodos usados: arrestos, gas/perdigones, ejército y lo que grabó la prensa.
   d.unrest += result.arrests * 1.5 + result.harshness * 0.1 + result.armyDeployed * 1;
   d.intlPressure += (result.pressIncidents * 2 + result.armyDeployed * 4 + result.harshness * 0.05) * sens;
@@ -251,6 +305,12 @@ export function endDay(state: RegimeState, handledUid: number | null, rng: Rando
   d.loyalty += PAY_LEVELS[state.payLevel].loyalty;
   d.intlPressure -= 2;
   d.unrest += (state.taxRate - 0.2) * 30 - 2;
+  if (state.prisoners > 0) {
+    // Tener presos políticos tiene un coste diario: ONG, familias y prensa no paran.
+    d.intlPressure += Math.min(8, state.prisoners * 0.15);
+    d.unrest += Math.min(5, state.prisoners * 0.1);
+    if (state.prisoners >= 10) notes.push(`${state.prisoners} presos políticos: las ONG exigen su liberación.`);
+  }
   if (state.upgrades.includes('propaganda')) {
     d.unrest -= 2;
     d.popularity += 1;

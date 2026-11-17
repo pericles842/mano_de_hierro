@@ -1,7 +1,8 @@
 import type * as THREE from 'three';
 import type { Screen } from '../core/Screen';
 import { CROWD_STAGES, stageForAnger } from '../data/crowdStages';
-import type { DiplomacyAction } from '../data/diplomacy';
+import type { DiplomacyAction, DiplomacyId } from '../data/diplomacy';
+import { Alerts } from '../ui/Alerts';
 import { RIOTS } from '../data/riots';
 import { initialAnger } from '../sim/riot/RiotSim';
 import { CountryView } from '../render/CountryView';
@@ -16,6 +17,10 @@ export interface CountryScreenOptions {
   onRegimeChanged(): void;
   onEmergency(): void;
   onDiplomacy(action: DiplomacyAction): void;
+  /** Acción diplomática lanzada desde una alerta. */
+  onQuickDiplomacy(id: DiplomacyId): void;
+  onRelease(): void;
+  onPayRaise(): void;
   onSuppress(riot: RiotInstance): void;
   onSkipDay(): void;
 }
@@ -27,6 +32,7 @@ export class CountryScreen implements Screen {
   private readonly labelLayer: HTMLElement;
   private readonly labels = new Map<number, HTMLElement>();
   private readonly briefing: HTMLElement;
+  private readonly alerts: Alerts;
   private width = 1;
   private height = 1;
 
@@ -36,6 +42,7 @@ export class CountryScreen implements Screen {
       onChange: o.onRegimeChanged,
       onEmergency: o.onEmergency,
       onDiplomacy: o.onDiplomacy,
+      onRelease: o.onRelease,
       onSelectRiot: (uid) => this.select(uid),
       onSkipDay: o.onSkipDay,
     });
@@ -51,6 +58,11 @@ export class CountryScreen implements Screen {
     }
     this.briefing = h('div', { class: 'briefing panel', style: 'display:none' });
     o.uiRoot.append(this.labelLayer, this.briefing);
+    this.alerts = new Alerts(o.uiRoot, o.regime, {
+      diplomacy: o.onQuickDiplomacy,
+      release: o.onRelease,
+      payRaise: o.onPayRaise,
+    });
   }
 
   private select(uid: number | null): void {
@@ -104,5 +116,6 @@ export class CountryScreen implements Screen {
     this.panel.dispose();
     this.labelLayer.remove();
     this.briefing.remove();
+    this.alerts.dispose();
   }
 }

@@ -11,6 +11,7 @@ export interface RiotHudHandlers {
   onSpeed(speed: number): void;
   onPause(): void;
   onMute(): void;
+  onDev(): void;
 }
 
 export interface SpeedState {
@@ -29,6 +30,7 @@ export class RiotHud {
   private readonly moodFill: HTMLElement;
   private readonly phase: HTMLElement;
   private readonly counts: HTMLElement;
+  private readonly scout: HTMLElement;
   private readonly selected: HTMLElement;
   private readonly banner: HTMLElement;
   private readonly toasts: HTMLElement;
@@ -38,6 +40,7 @@ export class RiotHud {
   private readonly speedButtons: { el: HTMLButtonElement; speed: number }[];
   private readonly pauseButton: HTMLButtonElement;
   private readonly muteButton: HTMLButtonElement;
+  private readonly devButton: HTMLButtonElement;
 
   constructor(parent: HTMLElement, sim: RiotSim, cityName: string, handlers: RiotHudHandlers) {
     this.timerFill = h('div', { class: 'bar-fill neutral' });
@@ -48,6 +51,7 @@ export class RiotHud {
     this.moodFill = h('div', { class: 'bar-fill' });
     this.phase = h('div', { class: 'riot-phase' });
     this.counts = h('div', { class: 'riot-counts' });
+    this.scout = h('div', { class: 'riot-scout', style: 'display:none' });
     this.selected = h('div', { class: 'selected-info' });
     this.banner = h('div', { class: 'banner' });
     this.toasts = h('div', { class: 'toasts' });
@@ -62,6 +66,7 @@ export class RiotHud {
       ]),
       this.phase,
       this.counts,
+      this.scout,
       sim.troopsReluctant ? h('div', { class: 'warning', text: '⚠ Lealtad baja: tus tropas dispersan con desgana.' }) : null,
     ]);
 
@@ -83,10 +88,12 @@ export class RiotHud {
       el: h('button', { class: 'chip', text: `x${speed}`, onClick: () => handlers.onSpeed(speed) }),
     }));
     this.muteButton = h('button', { class: 'chip', title: 'Sonido (M)', onClick: () => handlers.onMute() });
+    this.devButton = h('button', { class: 'chip dev-btn', text: '🛠 DEV', title: 'Modo developer: todas las tropas (temporal)', onClick: () => handlers.onDev() });
     const speed = h('div', { class: 'speed-panel panel' }, [
       this.pauseButton,
       ...this.speedButtons.map((s) => s.el),
       this.muteButton,
+      this.devButton,
     ]);
 
     // Barra de tropas por pestañas: Policía · Vehículos y defensas · Ejército.
@@ -123,12 +130,17 @@ export class RiotHud {
     const help = h('div', { class: 'riot-help' }, [
       h('div', { text: 'Colocar: clic en una tropa y clic en el mapa · Shift: hilera · Shift + rueda: cuántas · R: girar.' }),
       h('div', { text: 'Seleccionar: arrastra un recuadro · Shift: añadir · Doble clic: todas las de ese tipo.' }),
-      h('div', { text: 'Clic derecho: mover en formación (o cancelar la colocación).' }),
+      h('div', { text: 'Clic derecho: mover en formación · sobre un líder con el equipo de captura: arrestarlo · F: salva del camión lanzagás.' }),
       h('div', { text: 'Cámara: WASD, bordes o botón central · Q/E: rotar · Rueda: zoom · 1-4: fuerza · M: sonido' }),
     ]);
 
     this.root = h('div', { class: 'riot-hud' }, [top, force, speed, unitBar, this.selected, help, this.toasts, this.banner]);
     parent.append(this.root);
+  }
+
+  setDev(on: boolean): void {
+    this.devButton.classList.toggle('active', on);
+    this.devButton.textContent = on ? '🛠 DEV ON' : '🛠 DEV';
   }
 
   setTab(category: UnitCategory): void {
@@ -153,13 +165,25 @@ export class RiotHud {
     this.moodBadge.style.color = stage.color;
     this.moodFill.style.width = `${sim.anger * 100}%`;
     this.moodFill.style.background = stage.color;
-    this.phase.textContent = !sim.marchStarted
-      ? `⏳ Concentración: la marcha arranca en ${Math.ceil(sim.marchStartsIn)} s. ¡Coloca tus barricadas!`
-      : sim.chanting
-        ? '📣 Se detienen a cantar consignas...'
-        : `${stage.icon} ${stage.description}`;
-    this.phase.style.color = stage.color;
-    this.counts.textContent = `Protestando: ${sim.activeCount} · Dispersados: ${sim.dispersed} · Por llegar: ${sim.total - sim.spawned}`;
+    this.phase.textContent = sim.lethalForce
+      ? '☠️ FUEGO REAL: hay muertos. Los derechos humanos están suspendidos.'
+      : !sim.marchStarted
+        ? `⏳ Concentración: la marcha arranca en ${Math.ceil(sim.marchStartsIn)} s. ¡Coloca tus barricadas!`
+        : sim.crowdMode === 'rally'
+          ? `📣 Protestan en la plaza. Pueden avalancharse en cualquier momento. ${stage.icon} ${stage.name}`
+          : sim.chanting
+            ? '📣 Se detienen a cantar consignas...'
+            : `🏃 ¡Avanzan hacia el palacio! ${stage.icon} ${stage.description}`;
+    this.phase.style.color = sim.lethalForce ? '#f87171' : stage.color;
+    const casualties = sim.deaths + sim.injuredCount + sim.soldiersKilled > 0
+      ? ` · 🩸 Muertos: ${sim.deaths} · Heridos: ${sim.injuredCount} · Agentes caídos: ${sim.soldiersKilled}`
+      : '';
+    this.counts.textContent = `Protestando: ${sim.activeCount} · Dispersados: ${sim.dispersed} · Detenidos: ${sim.arrests} · Por llegar: ${sim.total - sim.spawned}${casualties}`;
+    const waveNames = { sur: 'la avenida sur', este: 'la calle este', oeste: 'la calle oeste' } as const;
+    this.scout.textContent = sim.hasHelicopter && sim.spawned < sim.total && sim.marchStarted
+      ? `🚁 Próxima oleada por ${waveNames[sim.nextWaveSpawn]} en ${Math.max(0, Math.ceil(sim.nextWaveIn))} s`
+      : '';
+    this.scout.style.display = this.scout.textContent ? '' : 'none';
 
     for (const [type, card] of this.cards) {
       const n = sim.available[type];

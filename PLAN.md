@@ -181,3 +181,25 @@ Simplificaciones respecto al plan: entidades como objetos tipados en lugar de un
 - Munición limitada, moral de la infantería (se repliega), tecla R para girar la hilera, barra de tropas por pestañas.
 - Noticiero en vivo (TV PATRIA oficial vs MUNDO 24H internacional) en el menú y durante la revuelta.
 - Despacho rediseñado con pestañas: Revueltas · Economía · Ejército · Diplomacia (6 acciones diplomáticas diarias).
+
+## Cambios v0.5
+- Botón 🛠 DEV (temporal, quitar antes de publicar): desbloquea todas las tropas en el despacho y en la revuelta.
+- Presos políticos: se acumulan con los arrestos, cuestan presión y molestia cada día; se liberan eligiendo cuántos (gesto o canje).
+- Alertas en el despacho con acciones directas (sanciones, presos, arcas vacías, cuarteles, popularidad).
+- Estatus internacional y presos visibles en la barra superior.
+- Ritmo de las protestas: primero protestan en la plaza y se avalanchan en un momento aleatorio (antes si hay más ira o más gente);
+  la tensión sube sola según la molestia y el tamaño; si se calman, se repliegan.
+- Perder el palacio no termina la revuelta: queda tomado, se puede recuperar, y el castigo depende del tiempo de ocupación.
+
+## Cambios v0.6
+- Perder la protesta (palacio a 0) no cuesta el día: reintentar es gratis; el día solo avanza con «Terminar el día sin intervenir».
+- Infantería activa: según el nivel de fuerza sale a enfrentar a la multitud dentro de un radio (contención = mantiene posición).
+- Fuego real: el ejército dispara desde «Perdigones»; la policía solo con «Mano dura» (alerta obligatoria de DDHH, pausa el juego).
+  Escopetas con munición letal y fusiles AK (mejora «Armamento pesado»). Muertos y heridos en el suelo (voxel, sin gore).
+- Manifestantes con armas de fuego si la molestia social es muy alta y la protesta está en caos: pueden matar agentes (cuerpos).
+- Relaciones: médicos levantan heridos; líder asesinado = mártir (furia y avalancha); prensa graba muertes (doble presión).
+- Unidades rediseñadas: motorizados (embestida, persecución, cortar oleadas), camión lanzagás (grupo más denso, cortina de gas,
+  tecla F), helicóptero (marca líderes, gas aéreo, aviso de oleadas, luz nocturna), topadora (barre, inmune al fuego, repara
+  barricadas), tanqueta (zona de miedo visible, atrae proyectiles, cuesta presión por segundo), equipo de captura (defiende,
+  sale solo a por líderes poco protegidos, clic derecho sobre un líder, 120 de integridad).
+- Equipo visible del antidisturbios: porra → bate, visera, máscara, escudo de policarbonato y AK con mano dura.

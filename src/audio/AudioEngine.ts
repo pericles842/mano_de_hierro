@@ -21,7 +21,9 @@ export type Sfx =
   | 'arrest'
   | 'alarm'
   | 'camera'
-  | 'rotor';
+  | 'rotor'
+  | 'rifle'
+  | 'engine';
 
 /** Mínimo de milisegundos entre dos reproducciones del mismo sonido (evita saturar). */
 const RATE_LIMIT_MS: Partial<Record<Sfx, number>> = {
@@ -35,6 +37,8 @@ const RATE_LIMIT_MS: Partial<Record<Sfx, number>> = {
   shot: 90,
   gasLaunch: 150,
   camera: 300,
+  rifle: 70,
+  engine: 400,
 };
 
 const CHANT_PATTERN = [1, 0, 1, 0, 1, 1, 0, 0];
@@ -176,6 +180,14 @@ export class AudioEngine {
         this.burst(0.03, 0.15, 'highpass', 5000);
         this.tone('square', 2400, 2400, 0.02, 0.04, 0.05);
         break;
+      case 'rifle':
+        this.burst(0.09, 0.35, 'bandpass', 900, 1.2);
+        this.tone('square', 120, 40, 0.08, 0.12);
+        break;
+      case 'engine':
+        this.tone('sawtooth', 90, 180, 0.45, 0.08);
+        this.tone('sawtooth', 95, 190, 0.45, 0.05, 0.02);
+        break;
       case 'rotor':
         for (let i = 0; i < 8; i++) this.burst(0.06, 0.12, 'lowpass', 300, 1, i * 0.09);
         break;
@@ -210,6 +222,20 @@ export class AudioEngine {
           break;
         case 'shot':
           this.play('shot');
+          break;
+        case 'liveShot':
+          this.play('rifle');
+          break;
+        case 'gunshot':
+          this.play('rifle');
+          break;
+        case 'openFire':
+        case 'martyr':
+        case 'soldierDown':
+          this.play('alarm');
+          break;
+        case 'charge':
+          this.play('engine');
           break;
         case 'gas':
           this.play('gasLaunch');

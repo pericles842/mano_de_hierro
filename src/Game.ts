@@ -3,6 +3,7 @@ import { GameLoop } from './core/GameLoop';
 import { Random } from './core/Random';
 import type { Screen } from './core/Screen';
 import { DICTATOR } from './data/country';
+import { DIPLOMACY, type DiplomacyAction, type DiplomacyId } from './data/diplomacy';
 import { RIOTS } from './data/riots';
 import { NewsFeed, riotAftermath } from './news/NewsFeed';
 import { CountryScreen } from './screens/CountryScreen';
@@ -12,8 +13,12 @@ import {
   applyRiotResult,
   checkStatus,
   createRegime,
+  devUnlock,
   endDay,
+  releasePrisoners,
   rollEvent,
+  setPayLevel,
+  useDiplomacy,
   type RegimeState,
   type RiotInstance,
 } from './sim/regime';
@@ -22,7 +27,16 @@ import type { RiotResult } from './sim/riot/types';
 import { Hud } from './ui/Hud';
 import { NewsTicker } from './ui/NewsTicker';
 import { h } from './ui/dom';
-import { fillNames, showDayReport, showEvent, showGameOver, showSetup, type RiotSummary } from './ui/modals';
+import {
+  fillNames,
+  showDayReport,
+  showEvent,
+  showGameOver,
+  showReleasePrisoners,
+  showRiotLost,
+  showSetup,
+  type RiotSummary,
+} from './ui/modals';
 
 /** Orquesta el juego: estado del régimen, noticiero, cambio de pantallas y bucle principal. */
 export class Game {
@@ -35,6 +49,8 @@ export class Game {
   private readonly news: NewsFeed;
   private readonly ticker: NewsTicker;
   private screen: Screen | null = null;
+  /** MODO DEVELOPER (temporal): todas las tropas desbloqueadas. */
+  private devMode = false;
 
   constructor(root: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -46,7 +62,10 @@ export class Game {
 
     this.uiRoot = h('div', { class: 'ui-root' });
     root.append(this.uiRoot);
-    this.hud = new Hud(this.uiRoot);
+    this.hud = new Hud(this.uiRoot, {
+      onDevToggle: () => this.toggleDev(),
+      onPrisoners: () => this.openRelease(),
+    });
     this.regime = createRegime(this.rng);
     this.news = new NewsFeed(this.rng);
     this.news.refresh(this.regime);
@@ -80,29 +99,82 @@ export class Game {
     screen.resize(window.innerWidth, window.innerHeight);
   }
 
+  /** Activa/desactiva el modo developer: tropas y dinero de sobra en el despacho y en la revuelta. */
+  private toggleDev(): void {
+    this.devMode = !this.devMode;
+    if (this.devMode) {
+      devUnlock(this.regime);
+      this.showCountry();
+    }
+    this.hud.update(this.regime, this.devMode);
+  }
+
+  private refreshCountry(): void {
+    this.hud.update(this.regime, this.devMode);
+    this.news.refresh(this.regime);
+    this.showCountry();
+    if (this.regime.status !== 'playing') this.gameOver();
+  }
+
+  private runDiplomacy(id: DiplomacyId): void {
+    const action = DIPLOMACY.find((a) => a.id === id);
+    if (!action || !useDiplomacy(this.regime, id)) return;
+    this.announceDiplomacy(action);
+    this.refreshCountry();
+  }
+
+  private announceDiplomacy(action: DiplomacyAction): void {
+    this.news.pushBreaking({ text: `Diplomacia: ${action.name.toLowerCase()}. ${action.description}`, source: 'internacional' }, action.id, 1);
+  }
+
+  private openRelease(): void {
+    showReleasePrisoners(this.uiRoot, this.regime, (count, mode) => {
+      const deltas = releasePrisoners(this.regime, count, mode);
+      if (deltas) {
+        this.news.pushBreaking({
+          text:
+            mode === 'canje'
+              ? `Pomposia canjea ${count} presos políticos por ayuda económica en una operación discreta.`
+              : `Liberados ${count} presos políticos: escenas de emoción a las puertas de la cárcel de ${this.regime.cityName}.`,
+          source: 'internacional',
+        });
+        this.news.pushBreaking({ text: `El ${DICTATOR.title} demuestra una vez más su infinita bondad.`, source: 'oficial' });
+        this.refreshCountry();
+      }
+      return deltas;
+    });
+  }
+
   private showCountry(): void {
     this.loop.paused = false;
     this.loop.speed = 1;
     this.hud.setVisible(true);
-    this.hud.update(this.regime);
+    this.hud.update(this.regime, this.devMode);
     this.ticker.setMode('menu');
     this.setScreen(
       new CountryScreen({
         renderer: this.renderer,
         uiRoot: this.uiRoot,
         regime: this.regime,
-        onRegimeChanged: () => this.hud.update(this.regime),
+        onRegimeChanged: () => this.hud.update(this.regime, this.devMode),
         onEmergency: () => {
-          this.hud.update(this.regime);
+          this.hud.update(this.regime, this.devMode);
           this.news.refresh(this.regime);
           this.news.pushBreaking({ text: `ÚLTIMA HORA: el gobierno decreta el Estado de Excepción en ${this.regime.cityName}.`, source: 'internacional' });
           this.news.pushBreaking({ text: '«Es solo para que todos estemos más tranquilos», asegura el Ministro de la Verdad.', source: 'oficial' });
         },
         onDiplomacy: (action) => {
-          this.hud.update(this.regime);
-          this.news.pushBreaking({ text: `Diplomacia: ${action.name.toLowerCase()}. ${action.description}`, source: 'internacional' }, action.id, 1);
+          this.announceDiplomacy(action);
+          this.hud.update(this.regime, this.devMode);
           this.news.refresh(this.regime);
           if (this.regime.status !== 'playing') this.gameOver();
+        },
+        onQuickDiplomacy: (id) => this.runDiplomacy(id),
+        onRelease: () => this.openRelease(),
+        onPayRaise: () => {
+          setPayLevel(this.regime, 2);
+          this.news.pushBreaking({ text: 'Subida de sueldo a las tropas: «Por su abnegada labor», dice el gobierno.', source: 'oficial' });
+          this.refreshCountry();
         },
         onSuppress: (riot) => this.startRiot(riot),
         onSkipDay: () => this.finishDay(null, null),
@@ -120,6 +192,7 @@ export class Game {
       upgrades: this.regime.upgrades,
       seed: this.rng.int(1, 1e9),
     });
+    if (this.devMode) sim.devUnlockAll();
     this.hud.setVisible(false);
     this.ticker.setMode('riot');
     this.setScreen(
@@ -130,6 +203,12 @@ export class Game {
         loop: this.loop,
         cityName: this.regime.cityName,
         news: this.news,
+        devMode: this.devMode,
+        onDevToggle: () => {
+          this.devMode = !this.devMode;
+          if (this.devMode) devUnlock(this.regime);
+          return this.devMode;
+        },
         onFinished: (result) => this.onRiotFinished(riot, result),
       }),
     );
@@ -137,13 +216,26 @@ export class Game {
 
   private onRiotFinished(riot: RiotInstance, result: RiotResult): void {
     const def = RIOTS[riot.defId];
+    if (!result.won) {
+      // Perder la protesta no cuesta el día: reintentar es gratis. El día solo avanza si el jugador lo fuerza.
+      this.showCountry();
+      showRiotLost(this.uiRoot, def, result, {
+        onRetry: () => this.startRiot(riot),
+        onBack: () => undefined,
+      });
+      return;
+    }
     const deltas = applyRiotResult(this.regime, result, def);
     for (const item of riotAftermath(result, def, this.regime.cityName)) this.news.pushBreaking(item);
+    if (result.arrests > 0) {
+      this.news.pushBreaking({ text: `${result.arrests} detenidos durante «${def.name}». Ya son ${this.regime.prisoners} los presos políticos.`, source: 'internacional' });
+    }
     this.finishDay(riot, { def, result, deltas });
   }
 
   private finishDay(riot: RiotInstance | null, summary: RiotSummary | null): void {
     const report = endDay(this.regime, riot?.uid ?? null, this.rng);
+    if (this.devMode) devUnlock(this.regime);
     this.news.refresh(this.regime);
     this.showCountry();
     showDayReport(this.uiRoot, this.regime, summary, report, () => {
@@ -157,9 +249,7 @@ export class Game {
         const deltas = applyEventOption(this.regime, option);
         checkStatus(this.regime);
         this.news.pushBreaking({ text: `${event.title}: ${fillNames(option.outcome, this.regime)}`, source: 'internacional' });
-        this.news.refresh(this.regime);
-        this.showCountry();
-        if (this.regime.status !== 'playing') this.gameOver();
+        this.refreshCountry();
         return deltas;
       });
     });

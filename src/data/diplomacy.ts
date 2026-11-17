@@ -1,5 +1,5 @@
 /** Acciones diplomáticas: cada una se puede usar una vez por día. */
-export type DiplomacyId = 'cumbre' | 'presos' | 'lobby' | 'onu' | 'aliado' | 'comercio';
+export type DiplomacyId = 'cumbre' | 'lobby' | 'onu' | 'aliado' | 'comercio';
 
 export interface DiplomacyAction {
   id: DiplomacyId;
@@ -27,14 +27,6 @@ export const DIPLOMACY: readonly DiplomacyAction[] = [
     effects: { treasury: -500, intlPressure: -12 },
   },
   {
-    id: 'presos',
-    icon: '🕊️',
-    name: 'Liberar presos políticos',
-    description: 'Gesto de buena voluntad muy aplaudido fuera. Tus generales lo ven como debilidad.',
-    effects: { intlPressure: -10, unrest: -4, loyalty: -4 },
-    minPressure: 20,
-  },
-  {
     id: 'comercio',
     icon: '🚢',
     name: 'Firmar un acuerdo comercial',
@@ -59,7 +51,15 @@ export const DIPLOMACY: readonly DiplomacyAction[] = [
 
 /** El comercio se cierra cuando la presión internacional es muy alta. */
 export function diplomacyBlocked(action: DiplomacyAction, intlPressure: number): string | null {
-  if (action.minPressure !== undefined && intlPressure < action.minPressure) return 'No hay presos que liberar... oficialmente.';
+  if (action.minPressure !== undefined && intlPressure < action.minPressure) return 'Ahora mismo no tiene sentido.';
   if (action.id === 'comercio' && intlPressure > 55) return 'Con estas sanciones nadie quiere comerciar contigo.';
   return null;
+}
+
+/** Estatus internacional del régimen según la presión. */
+export function internationalStatus(intlPressure: number): { icon: string; name: string; tone: 'good' | 'neutral' | 'bad' } {
+  if (intlPressure > 60) return { icon: '🔴', name: 'Paria internacional', tone: 'bad' };
+  if (intlPressure > 35) return { icon: '🟠', name: 'Bajo sanciones', tone: 'bad' };
+  if (intlPressure > 15) return { icon: '🟡', name: 'Bajo vigilancia', tone: 'neutral' };
+  return { icon: '🟢', name: 'Respetable (casi)', tone: 'good' };
 }

@@ -159,6 +159,24 @@ export function riotHeadline(e: RiotEvent, def: RiotDef, city: string): [NewsIte
       return [{ text: 'Disparos de perdigones contra los manifestantes, según testigos.', source: 'internacional' }, 'shot'];
     case 'tire':
       return [{ text: 'Cauchos en llamas trancan las calles: columnas de humo negro sobre la ciudad.', source: 'internacional' }, 'tire'];
+    case 'openFire':
+      return e.by === 'army'
+        ? [{ text: `ÚLTIMA HORA: el ejército abre fuego real contra los manifestantes en ${city}.`, source: 'internacional' }, 'openFire-army']
+        : [{ text: `ÚLTIMA HORA: la policía dispara munición letal en ${city}. Organismos de DDHH denuncian una masacre.`, source: 'internacional' }, 'openFire-police'];
+    case 'killed':
+      if (e.kind === 'prensa') return [{ text: 'Un periodista muere mientras cubría la protesta. Conmoción internacional.', source: 'internacional' }, 'press-killed'];
+      if (e.kind === 'medico') return [{ text: 'Muere un voluntario de las brigadas de primeros auxilios.', source: 'internacional' }, 'medic-killed'];
+      return [{ text: 'Se confirman muertos en la Plaza de la Patria. La cifra sigue subiendo.', source: 'internacional' }, 'killed'];
+    case 'martyr':
+      return [{ text: 'Asesinado un líder de la protesta: la multitud lo proclama mártir.', source: 'internacional' }, 'martyr'];
+    case 'soldierDown':
+      return [{ text: '«Terroristas armados» atacan a las fuerzas del orden, denuncia el gobierno.', source: 'oficial' }, 'soldierDown'];
+    case 'surge':
+      return [{ text: `ÚLTIMA HORA: la multitud de «${def.name}» se lanza hacia el palacio.`, source: 'internacional' }, 'surge'];
+    case 'regroup':
+      return [{ text: 'Los manifestantes se repliegan y siguen protestando de forma pacífica.', source: 'internacional' }, 'regroup'];
+    case 'palaceFallen':
+      return [{ text: `HISTÓRICO: los manifestantes toman el palacio presidencial de ${city}.`, source: 'internacional' }, 'fallen'];
     default:
       return null;
   }

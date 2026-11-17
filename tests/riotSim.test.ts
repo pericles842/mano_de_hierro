@@ -55,7 +55,7 @@ describe('RiotSim', () => {
     for (let x = -12; x <= 12; x += 3) sim.deploy('soldier', x, -11);
     run(sim, 400);
     expect(sim.result?.won).toBe(true);
-    expect(sim.result!.dispersed).toBeGreaterThan(0);
+    expect(sim.result!.palaceFallen).toBe(false);
   });
 
   it('la mano dura escala la protesta y arma a la gente', () => {

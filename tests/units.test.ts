@@ -111,7 +111,7 @@ describe('ejército y lealtad', () => {
     const base = {
       won: true, reason: 'time' as const, total: 100, dispersed: 50, elapsed: 100, avgForce: 0, tanquetas: 0,
       brokenUnits: 0, palaceHp: 90, peakStage: 0 as const, finalAnger: 0.2, arrests: 0, pressIncidents: 0,
-      armyDeployed: 0, deserted: 0, harshness: 0,
+      armyDeployed: 0, deserted: 0, harshness: 0, palaceFallen: false, occupiedSeconds: 0, deaths: 0, injured: 0, leadersKilled: 0, soldiersKilled: 0, tanquetaSeconds: 0,
     };
     const a = createRegime(new Random(1));
     const b = createRegime(new Random(1));

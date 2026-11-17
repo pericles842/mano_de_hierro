@@ -3,6 +3,8 @@ import type { UnitType } from './units';
 export type UpgradeId =
   | 'policarbonato'
   | 'cascos'
+  | 'bate'
+  | 'fusiles'
   | 'tanques'
   | 'concreto'
   | 'megafonos'
@@ -19,10 +21,12 @@ export interface UpgradeDef {
 }
 
 export const UPGRADE_ORDER: readonly UpgradeId[] = [
-  'policarbonato',
   'cascos',
+  'bate',
+  'policarbonato',
   'mascaras',
   'municion',
+  'fusiles',
   'concreto',
   'tanques',
   'megafonos',
@@ -34,15 +38,30 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     id: 'policarbonato',
     name: 'Escudos de policarbonato',
     icon: '🛡️',
-    description: 'Antidisturbios y muros de escudos aguantan un 40% más.',
+    description: 'Escudos grandes y transparentes: antidisturbios y muros aguantan un 40% más.',
     price: 500,
   },
   cascos: {
     id: 'cascos',
     name: 'Cascos con visera',
     icon: '⛑️',
-    description: 'Piedras y bombas incendiarias hacen un 40% menos de daño.',
+    description: 'Piedras y bombas incendiarias hacen un 40% menos de daño. Se ve la visera.',
     price: 300,
+  },
+  bate: {
+    id: 'bate',
+    name: 'Bates en lugar de porras',
+    icon: '🏏',
+    description: 'Los antidisturbios cambian la porra por un bate: +50% de dispersión y empuje cuerpo a cuerpo. La gente se enfada más.',
+    price: 250,
+  },
+  fusiles: {
+    id: 'fusiles',
+    name: 'Armamento pesado (fusiles AK)',
+    icon: '🔫',
+    description:
+      'Fusiles de asalto para los antidisturbios. Solo disparan con «Mano dura»: fuego real, habrá muertos y los derechos humanos quedan suspendidos.',
+    price: 700,
   },
   mascaras: {
     id: 'mascaras',
@@ -95,6 +114,10 @@ export interface UpgradeEffects {
   projectileDamageMult: number;
   ammoMult: number;
   gasImmune: boolean;
+  /** Multiplicador cuerpo a cuerpo de los antidisturbios (bate). */
+  meleeMult: number;
+  /** Los antidisturbios llevan fusiles (solo se usan con mano dura). */
+  rifles: boolean;
 }
 
 export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
@@ -123,5 +146,7 @@ export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
     projectileDamageMult: has('cascos') ? 0.6 : 1,
     ammoMult: has('municion') ? 1.5 : 1,
     gasImmune: has('mascaras'),
+    meleeMult: has('bate') ? 1.5 : 1,
+    rifles: has('fusiles'),
   };
 }

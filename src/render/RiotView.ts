@@ -10,7 +10,9 @@ import {
   MODEL_PALO,
   MODEL_PRENSA,
   VOXEL_MATERIAL,
+  gearFrom,
   getModel,
+  getUnitModel,
 } from './models';
 import { VoxelParticles } from './particles';
 import { buildRiotEnvironment, type RiotEnvironment } from './riotEnvironment';
@@ -40,6 +42,19 @@ export class RiotView {
   private readonly ringGeometry = new THREE.RingGeometry(1, 1.18, 32);
   private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.9 });
   private readonly markerMaterial = new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true });
+  /** Charcos de sangre bajo los caídos (estilo voxel, sin gore). */
+  private readonly blood: THREE.InstancedMesh;
+  private readonly bloodGeometry = new THREE.BoxGeometry(1, 0.04, 1);
+  private readonly bloodMaterial = new THREE.MeshLambertMaterial({ color: 0x7f1d1d });
+  /** Rombos amarillos sobre los líderes marcados por el helicóptero. */
+  private readonly marks: THREE.InstancedMesh;
+  private readonly markGeometry = new THREE.OctahedronGeometry(0.22);
+  private readonly markMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+  /** Cuerpos de agentes caídos. */
+  private readonly unitBodies: THREE.Mesh[] = [];
+  /** Zona de miedo de la tanqueta. */
+  private readonly fearRingGeometry = new THREE.RingGeometry(9.6, 10, 48);
+  private readonly fearRingMaterial = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.3, depthWrite: false });
   /** Haz del reflector del helicóptero. */
   private readonly beamGeometry = new THREE.CylinderGeometry(0.4, 3.5, HELI_ALTITUDE, 16, 1, true);
   private readonly beamMaterial = new THREE.MeshBasicMaterial({
@@ -60,6 +75,7 @@ export class RiotView {
   private fireAccumulator = 0;
   private time = 0;
   private readonly dummy = new THREE.Object3D();
+  private readonly dummy2 = new THREE.Object3D();
   private readonly shade = new THREE.Color();
 
   constructor(private readonly sim: RiotSim) {
@@ -92,7 +108,7 @@ export class RiotView {
     this.scene.add(this.env.group);
 
     this.crowd = CROWD_MODELS.map((key) => {
-      const mesh = new THREE.InstancedMesh(getModel(key), VOXEL_MATERIAL, Math.max(1, sim.total));
+      const mesh = new THREE.InstancedMesh(getModel(key), VOXEL_MATERIAL, Math.max(1, sim.total + 40));
       mesh.frustumCulled = false; // las instancias se mueven: el bounding sphere no sirve
       mesh.castShadow = true;
       mesh.setColorAt(0, new THREE.Color(0xffffff));
@@ -100,7 +116,17 @@ export class RiotView {
       this.scene.add(mesh);
       return mesh;
     });
-    this.headings = new Float32Array(Math.max(1, sim.total)).fill(Math.PI);
+    this.headings = new Float32Array(Math.max(1, sim.total + 40)).fill(Math.PI);
+    this.dummy.rotation.order = 'YXZ';
+
+    this.blood = new THREE.InstancedMesh(this.bloodGeometry, this.bloodMaterial, Math.max(1, sim.total + 60));
+    this.blood.frustumCulled = false;
+    this.blood.receiveShadow = true;
+    this.blood.count = 0;
+    this.marks = new THREE.InstancedMesh(this.markGeometry, this.markMaterial, 32);
+    this.marks.frustumCulled = false;
+    this.marks.count = 0;
+    this.scene.add(this.blood, this.marks);
 
     this.scene.add(this.particles.mesh);
 
@@ -152,6 +178,27 @@ export class RiotView {
         case 'desert':
           fx.burst(e.x, 1.5, e.z, 14, 0x4d5b2e, 3, 0.25, 0.9);
           break;
+        case 'liveShot': {
+          fx.ballistic(e.fromX, 1.3, e.fromZ, e.toX, 1, e.toZ, 60, 0xfff7c2, 0.08);
+          const dx = Math.sign(e.toX - e.fromX) * 0.5;
+          const dz = Math.sign(e.toZ - e.fromZ) * 0.5;
+          fx.burst(e.fromX + dx, 1.3, e.fromZ + dz, 4, 0xffc247, 3, 0.12, 0.12); // fogonazo
+          if (e.result !== 'miss') fx.burst(e.toX, 1, e.toZ, e.result === 'kill' ? 6 : 3, 0xb91c1c, 1.8, 0.12, 0.5);
+          break;
+        }
+        case 'gunshot':
+          fx.ballistic(e.fromX, 1.4, e.fromZ, e.toX, 1, e.toZ, 55, 0xffa94d, 0.08);
+          fx.burst(e.toX, 1, e.toZ, 4, 0xb91c1c, 1.8, 0.12, 0.5);
+          break;
+        case 'soldierDown':
+          fx.burst(e.x, 1, e.z, 8, 0xb91c1c, 2, 0.14, 0.6);
+          break;
+        case 'charge':
+          fx.burst(e.x, 0.3, e.z, 10, 0xa8a29e, 3, 0.3, 0.7);
+          break;
+        case 'killed':
+        case 'martyr':
+        case 'openFire':
         case 'refuse':
         case 'retreat':
         case 'deployed':
@@ -276,26 +323,59 @@ export class RiotView {
     const counts = new Array<number>(this.crowd.length).fill(0);
     const t = this.time;
     const chanting = this.sim.chanting;
+    let bloodCount = 0;
+    let markCount = 0;
     for (const p of this.sim.protesters) {
       if (p.state === 'gone') continue;
+      const down = p.state === 'dead' || p.state === 'injured';
       const speed = Math.hypot(p.vx, p.vz);
       if (p.state === 'occupying') this.headings[p.id] = Math.PI;
-      else if (speed > 0.3) this.headings[p.id] = Math.atan2(p.vx, p.vz);
+      else if (!down && speed > 0.3) this.headings[p.id] = Math.atan2(p.vx, p.vz);
+      const heading = this.headings[p.id];
+      const x = down ? p.x : p.px + (p.x - p.px) * alpha;
+      const z = down ? p.z : p.pz + (p.z - p.pz) * alpha;
 
-      let bob = 0;
-      if (p.state === 'occupying' || (chanting && p.state !== 'fleeing')) bob = Math.abs(Math.sin(t * 6 + p.id)) * 0.25;
-      else if (speed > 0.3) bob = Math.abs(Math.sin(t * 12 + p.id)) * 0.1;
-
-      this.dummy.position.set(p.px + (p.x - p.px) * alpha, bob, p.pz + (p.z - p.pz) * alpha);
-      this.dummy.rotation.y = this.headings[p.id];
+      if (down) {
+        // Tendido en el suelo.
+        this.dummy.position.set(x, 0.2, z);
+        this.dummy.rotation.set(-Math.PI / 2, heading, 0);
+        if (bloodCount < this.blood.instanceMatrix.count) {
+          const size = p.state === 'dead' ? 1.3 + ((p.id * 13) % 7) / 10 : 0.6;
+          this.bloodDummy(x - Math.sin(heading) * 0.8, z - Math.cos(heading) * 0.8, size, p.id);
+          this.blood.setMatrixAt(bloodCount++, this.dummy2.matrix);
+        }
+      } else {
+        let bob = 0;
+        if (p.state === 'occupying' || (chanting && p.state !== 'fleeing')) bob = Math.abs(Math.sin(t * 6 + p.id)) * 0.25;
+        else if (speed > 0.3) bob = Math.abs(Math.sin(t * 12 + p.id)) * 0.1;
+        this.dummy.position.set(x, bob, z);
+        this.dummy.rotation.set(0, heading, 0);
+        if (p.marked > 0 && markCount < 32) {
+          this.dummy2.position.set(x, 2.3 + Math.sin(t * 5) * 0.1, z);
+          this.dummy2.rotation.set(0, t * 3, 0);
+          this.dummy2.scale.setScalar(1);
+          this.dummy2.updateMatrix();
+          this.marks.setMatrixAt(markCount++, this.dummy2.matrix);
+        }
+      }
       this.dummy.updateMatrix();
       const model = this.modelFor(p);
       const mesh = this.crowd[model];
       const idx = counts[model]++;
       mesh.setMatrixAt(idx, this.dummy.matrix);
-      this.shade.setScalar(p.state === 'fleeing' ? 1.15 : 0.82 + ((p.id * 37) % 19) / 100);
+      const shade = p.state === 'dead' ? 0.55 : p.state === 'fleeing' ? 1.15 : 0.82 + ((p.id * 37) % 19) / 100;
+      this.shade.setScalar(shade);
       mesh.setColorAt(idx, this.shade);
     }
+    for (const body of this.sim.bodies) {
+      if (bloodCount >= this.blood.instanceMatrix.count) break;
+      this.bloodDummy(body.x, body.z, 1.6, Math.round(body.x * 10));
+      this.blood.setMatrixAt(bloodCount++, this.dummy2.matrix);
+    }
+    this.blood.count = bloodCount;
+    this.blood.instanceMatrix.needsUpdate = true;
+    this.marks.count = markCount;
+    this.marks.instanceMatrix.needsUpdate = true;
     this.crowd.forEach((mesh, i) => {
       mesh.count = counts[i];
       mesh.instanceMatrix.needsUpdate = true;
@@ -303,9 +383,29 @@ export class RiotView {
     });
   }
 
+  /** Charco de sangre plano en el suelo (tamaño y giro pseudoaleatorios por semilla). */
+  private bloodDummy(x: number, z: number, size: number, seed: number): void {
+    this.dummy2.position.set(x, 0.03, z);
+    this.dummy2.rotation.set(0, (seed * 0.7) % Math.PI, 0);
+    this.dummy2.scale.set(size, 1, size * 0.8);
+    this.dummy2.updateMatrix();
+  }
+
   private renderUnits(alpha: number, selected: ReadonlySet<number>): void {
     this.seen.clear();
     let ring = 0;
+    const gear = gearFrom(this.sim.upgrades, this.sim.forceLevel >= 3);
+    // Cuerpos de agentes caídos.
+    while (this.unitBodies.length < this.sim.bodies.length) {
+      const body = this.sim.bodies[this.unitBodies.length];
+      const mesh = new THREE.Mesh(getUnitModel(body.type, gear), VOXEL_MATERIAL);
+      mesh.rotation.order = 'YXZ';
+      mesh.rotation.set(-Math.PI / 2, body.heading, 0);
+      mesh.position.set(body.x, 0.25, body.z);
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+      this.unitBodies.push(mesh);
+    }
     for (const u of this.sim.units) {
       this.seen.add(u.id);
       let mesh = this.unitMeshes.get(u.id);
@@ -313,6 +413,11 @@ export class RiotView {
         mesh = this.createUnitMesh(u.type);
         this.scene.add(mesh);
         this.unitMeshes.set(u.id, mesh);
+      }
+      // El equipo cambia a la vista: porra/bate, visera, máscara, escudo y fusil con mano dura.
+      if (u.type === 'soldier' || u.type === 'shield') {
+        const geometry = getUnitModel(u.type, gear);
+        if (mesh.geometry !== geometry) mesh.geometry = geometry;
       }
       const x = u.px + (u.x - u.px) * alpha;
       const z = u.pz + (u.z - u.pz) * alpha;
@@ -344,6 +449,12 @@ export class RiotView {
     const mesh = new THREE.Mesh(getModel(type), VOXEL_MATERIAL);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    if (type === 'tanqueta') {
+      const ring = new THREE.Mesh(this.fearRingGeometry, this.fearRingMaterial);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.05;
+      mesh.add(ring);
+    }
     if (type === 'helicopter') {
       const rotor = new THREE.Mesh(getModel('rotor'), VOXEL_MATERIAL);
       rotor.name = 'rotor';
@@ -447,6 +558,14 @@ export class RiotView {
     this.ghostBad.dispose();
     this.beamGeometry.dispose();
     this.beamMaterial.dispose();
+    this.blood.dispose();
+    this.bloodGeometry.dispose();
+    this.bloodMaterial.dispose();
+    this.marks.dispose();
+    this.markGeometry.dispose();
+    this.markMaterial.dispose();
+    this.fearRingGeometry.dispose();
+    this.fearRingMaterial.dispose();
     this.scene.clear();
   }
 }
