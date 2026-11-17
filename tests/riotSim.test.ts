@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { RIOTS, type RiotDef } from '../src/data/riots';
-import type { UnitType } from '../src/data/units';
+import { makeStock } from './helpers';
 import { PREP_TIME, RiotSim } from '../src/sim/riot/RiotSim';
 
-const STOCK: Record<UnitType, number> = { soldier: 20, shield: 6, barricade: 6, ballena: 1, tanqueta: 1 };
+const STOCK = makeStock({ soldier: 20, shield: 6, barricade: 6, ballena: 1, tanqueta: 1 });
 
 function makeSim(seed = 1, def: RiotDef = RIOTS.cacerolazo, unrest = 20): RiotSim {
   return new RiotSim({ def, scale: 1, stock: { ...STOCK }, loyalty: 70, unrest, seed });

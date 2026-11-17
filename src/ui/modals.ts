@@ -153,7 +153,7 @@ export function showDayReport(
   showModal(parent, title, body, [{ label: 'Continuar', primary: true, onClick: onClose }]);
 }
 
-function fillNames(text: string, state: RegimeState): string {
+export function fillNames(text: string, state: RegimeState): string {
   return text.replaceAll('{ruler}', `${DICTATOR.title} ${state.rulerName}`).replaceAll('{city}', state.cityName);
 }
 

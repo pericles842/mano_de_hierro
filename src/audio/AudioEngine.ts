@@ -15,7 +15,13 @@ export type Sfx =
   | 'siren'
   | 'wave'
   | 'win'
-  | 'lose';
+  | 'lose'
+  | 'shot'
+  | 'gasLaunch'
+  | 'arrest'
+  | 'alarm'
+  | 'camera'
+  | 'rotor';
 
 /** Mínimo de milisegundos entre dos reproducciones del mismo sonido (evita saturar). */
 const RATE_LIMIT_MS: Partial<Record<Sfx, number>> = {
@@ -26,6 +32,9 @@ const RATE_LIMIT_MS: Partial<Record<Sfx, number>> = {
   molotov: 120,
   place: 40,
   click: 30,
+  shot: 90,
+  gasLaunch: 150,
+  camera: 300,
 };
 
 const CHANT_PATTERN = [1, 0, 1, 0, 1, 1, 0, 0];
@@ -148,6 +157,28 @@ export class AudioEngine {
       case 'lose':
         [392, 330, 262, 196].forEach((f, i) => this.tone('triangle', f, f * 0.98, 0.3, 0.12, i * 0.2));
         break;
+      case 'shot':
+        this.burst(0.07, 0.3, 'bandpass', 1400, 1.5);
+        this.tone('square', 180, 60, 0.06, 0.08);
+        break;
+      case 'gasLaunch':
+        this.tone('sine', 120, 70, 0.12, 0.25);
+        this.burst(0.5, 0.06, 'highpass', 3000, 1, 0.2);
+        break;
+      case 'arrest':
+        this.tone('square', 1200, 1200, 0.05, 0.06);
+        this.tone('square', 900, 900, 0.05, 0.06, 0.08);
+        break;
+      case 'alarm':
+        [0, 0.3, 0.6].forEach((d) => this.tone('sawtooth', 700, 500, 0.25, 0.07, d));
+        break;
+      case 'camera':
+        this.burst(0.03, 0.15, 'highpass', 5000);
+        this.tone('square', 2400, 2400, 0.02, 0.04, 0.05);
+        break;
+      case 'rotor':
+        for (let i = 0; i < 8; i++) this.burst(0.06, 0.12, 'lowpass', 300, 1, i * 0.09);
+        break;
     }
   }
 
@@ -177,7 +208,32 @@ export class AudioEngine {
         case 'marchStart':
           this.play('wave');
           break;
+        case 'shot':
+          this.play('shot');
+          break;
+        case 'gas':
+          this.play('gasLaunch');
+          break;
+        case 'arrest':
+          this.play('arrest');
+          break;
+        case 'press':
+          this.play('camera');
+          break;
+        case 'refuse':
+        case 'desert':
+          this.play('alarm');
+          break;
+        case 'extinguish':
+          this.play('spray');
+          break;
+        case 'deployed':
+          if (e.unitType === 'ballena' || e.unitType === 'tanqueta' || e.unitType === 'gastruck') this.play('siren');
+          else if (e.unitType === 'helicopter') this.play('rotor');
+          break;
         case 'disperse':
+        case 'rescue':
+        case 'retreat':
           break;
       }
     }

@@ -2,11 +2,21 @@ import * as THREE from 'three';
 import { UNITS, type UnitType } from '../data/units';
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { Protester, RiotEvent } from '../sim/riot/types';
-import { CROWD_MODELS, MODEL_MOLOTOV, MODEL_PALO, VOXEL_MATERIAL, getModel } from './models';
+import {
+  CROWD_MODELS,
+  MODEL_ESCUDERO,
+  MODEL_MEDICO,
+  MODEL_MOLOTOV,
+  MODEL_PALO,
+  MODEL_PRENSA,
+  VOXEL_MATERIAL,
+  getModel,
+} from './models';
 import { VoxelParticles } from './particles';
 import { buildRiotEnvironment, type RiotEnvironment } from './riotEnvironment';
 
 const SKY = 0xa9c7e0;
+const HELI_ALTITUDE = 9;
 const NIGHT_SKY = 0x0d1224;
 const FLAME_COLORS = [0xff6a00, 0xffb300, 0xff3d00, 0xffd54a];
 
@@ -30,6 +40,15 @@ export class RiotView {
   private readonly ringGeometry = new THREE.RingGeometry(1, 1.18, 32);
   private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.9 });
   private readonly markerMaterial = new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true });
+  /** Haz del reflector del helicóptero. */
+  private readonly beamGeometry = new THREE.CylinderGeometry(0.4, 3.5, HELI_ALTITUDE, 16, 1, true);
+  private readonly beamMaterial = new THREE.MeshBasicMaterial({
+    color: 0xfff3b0,
+    transparent: true,
+    opacity: 0.13,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
   private readonly ghostOk = ghostMaterial(0xffffff);
   private readonly ghostBad = ghostMaterial(0xff4444);
   private readonly ghosts: THREE.Mesh[] = [];
@@ -110,6 +129,32 @@ export class RiotView {
           break;
         case 'tire':
           fx.burst(e.x, 0.4, e.z, 8, 0x1f1f1f, 2, 0.35, 0.8);
+          break;
+        case 'gas':
+          fx.ballistic(e.fromX, 1.6, e.fromZ, e.toX, 0.2, e.toZ, 14, 0x6b7280, 0.2);
+          break;
+        case 'shot':
+          fx.ballistic(e.fromX, 1.1, e.fromZ, e.toX, 1, e.toZ, 40, 0xffd34d, 0.1);
+          fx.burst(e.fromX + Math.sign(e.toX - e.fromX) * 0.4, 1.1, e.fromZ + Math.sign(e.toZ - e.fromZ) * 0.4, 3, 0xffb347, 3, 0.12, 0.15);
+          break;
+        case 'arrest':
+          fx.burst(e.x, 1.2, e.z, 10, 0x3b82f6, 2.5, 0.2, 0.6);
+          break;
+        case 'rescue':
+          fx.burst(e.x, 1.5, e.z, 6, 0xef4444, 1.5, 0.15, 0.6);
+          break;
+        case 'press':
+          for (let i = 0; i < 5; i++) fx.burst(e.x, 2, e.z, 1, 0xffffff, 1, 0.18, 0.25); // flashes de cámara
+          break;
+        case 'extinguish':
+          fx.burst(e.x, 0.5, e.z, 12, 0x9ca3af, 2.5, 0.35, 1);
+          break;
+        case 'desert':
+          fx.burst(e.x, 1.5, e.z, 14, 0x4d5b2e, 3, 0.25, 0.9);
+          break;
+        case 'refuse':
+        case 'retreat':
+        case 'deployed':
           break;
         case 'spray':
           for (let k = 0; k < 3; k++) {
@@ -213,11 +258,15 @@ export class RiotView {
 
     this.palaceSmoke(simDt);
     this.fireParticles(simDt);
+    this.gasParticles(simDt);
     this.particles.update(simDt);
     renderer.render(this.scene, this.camera);
   }
 
   private modelFor(p: Protester): number {
+    if (p.kind === 'escudero') return MODEL_ESCUDERO;
+    if (p.kind === 'prensa') return MODEL_PRENSA;
+    if (p.kind === 'medico') return MODEL_MEDICO;
     if (p.weapon === 'palo') return MODEL_PALO;
     if (p.weapon === 'molotov') return MODEL_MOLOTOV;
     return p.model;
@@ -261,16 +310,19 @@ export class RiotView {
       this.seen.add(u.id);
       let mesh = this.unitMeshes.get(u.id);
       if (!mesh) {
-        mesh = new THREE.Mesh(getModel(u.type), VOXEL_MATERIAL);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        mesh = this.createUnitMesh(u.type);
         this.scene.add(mesh);
         this.unitMeshes.set(u.id, mesh);
       }
       const x = u.px + (u.x - u.px) * alpha;
       const z = u.pz + (u.z - u.pz) * alpha;
-      mesh.position.set(x, 0, z);
+      const flying = UNITS[u.type].flying === true;
+      mesh.position.set(x, flying ? HELI_ALTITUDE + Math.sin(this.time * 2 + u.id) * 0.3 : 0, z);
       mesh.rotation.y = u.heading;
+      if (flying) {
+        const rotor = mesh.getObjectByName('rotor');
+        if (rotor) rotor.rotation.y = this.time * 25;
+      }
 
       if (selected.has(u.id)) {
         const def = UNITS[u.type];
@@ -285,6 +337,46 @@ export class RiotView {
       if (this.seen.has(id)) continue;
       this.scene.remove(mesh);
       this.unitMeshes.delete(id);
+    }
+  }
+
+  private createUnitMesh(type: UnitType): THREE.Mesh {
+    const mesh = new THREE.Mesh(getModel(type), VOXEL_MATERIAL);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    if (type === 'helicopter') {
+      const rotor = new THREE.Mesh(getModel('rotor'), VOXEL_MATERIAL);
+      rotor.name = 'rotor';
+      rotor.position.y = 2.6;
+      const beam = new THREE.Mesh(this.beamGeometry, this.beamMaterial);
+      beam.position.y = -HELI_ALTITUDE / 2;
+      mesh.add(rotor, beam);
+    }
+    return mesh;
+  }
+
+  private gasParticles(dt: number): void {
+    for (const g of this.sim.gasClouds) {
+      const fade = g.life / g.maxLife;
+      const rate = dt * 30 * fade;
+      const n = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * g.r;
+        this.particles.spawn({
+          x: g.x + Math.cos(a) * r,
+          y: 0.3 + Math.random() * 0.8,
+          z: g.z + Math.sin(a) * r,
+          vx: this.sim.wind.x + (Math.random() - 0.5) * 0.3,
+          vy: 0.25 + Math.random() * 0.3,
+          vz: this.sim.wind.z + (Math.random() - 0.5) * 0.3,
+          life: 1.2 + Math.random() * 0.8,
+          size: 0.6,
+          sizeEnd: 1.5,
+          color: Math.random() < 0.5 ? 0xe5e7eb : 0xd9f99d,
+          drag: 0.3,
+        });
+      }
     }
   }
 
@@ -353,6 +445,8 @@ export class RiotView {
     this.markerMaterial.dispose();
     this.ghostOk.dispose();
     this.ghostBad.dispose();
+    this.beamGeometry.dispose();
+    this.beamMaterial.dispose();
     this.scene.clear();
   }
 }

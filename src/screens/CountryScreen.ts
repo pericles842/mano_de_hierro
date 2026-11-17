@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type { Screen } from '../core/Screen';
 import { CROWD_STAGES, stageForAnger } from '../data/crowdStages';
+import type { DiplomacyAction } from '../data/diplomacy';
 import { RIOTS } from '../data/riots';
 import { initialAnger } from '../sim/riot/RiotSim';
 import { CountryView } from '../render/CountryView';
@@ -13,6 +14,8 @@ export interface CountryScreenOptions {
   uiRoot: HTMLElement;
   regime: RegimeState;
   onRegimeChanged(): void;
+  onEmergency(): void;
+  onDiplomacy(action: DiplomacyAction): void;
   onSuppress(riot: RiotInstance): void;
   onSkipDay(): void;
 }
@@ -31,6 +34,8 @@ export class CountryScreen implements Screen {
     this.view = new CountryView(o.renderer.domElement, o.regime.activeRiots);
     this.panel = new CountryPanel(o.uiRoot, o.regime, {
       onChange: o.onRegimeChanged,
+      onEmergency: o.onEmergency,
+      onDiplomacy: o.onDiplomacy,
       onSelectRiot: (uid) => this.select(uid),
       onSkipDay: o.onSkipDay,
     });

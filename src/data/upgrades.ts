@@ -1,6 +1,14 @@
 import type { UnitType } from './units';
 
-export type UpgradeId = 'policarbonato' | 'cascos' | 'tanques' | 'concreto' | 'megafonos' | 'propaganda';
+export type UpgradeId =
+  | 'policarbonato'
+  | 'cascos'
+  | 'tanques'
+  | 'concreto'
+  | 'megafonos'
+  | 'propaganda'
+  | 'mascaras'
+  | 'municion';
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -10,7 +18,16 @@ export interface UpgradeDef {
   price: number;
 }
 
-export const UPGRADE_ORDER: readonly UpgradeId[] = ['policarbonato', 'cascos', 'concreto', 'tanques', 'megafonos', 'propaganda'];
+export const UPGRADE_ORDER: readonly UpgradeId[] = [
+  'policarbonato',
+  'cascos',
+  'mascaras',
+  'municion',
+  'concreto',
+  'tanques',
+  'megafonos',
+  'propaganda',
+];
 
 export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
   policarbonato: {
@@ -25,6 +42,20 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     name: 'Cascos con visera',
     icon: '⛑️',
     description: 'Piedras y bombas incendiarias hacen un 40% menos de daño.',
+    price: 300,
+  },
+  mascaras: {
+    id: 'mascaras',
+    name: 'Máscaras antigás',
+    icon: '😷',
+    description: 'Tus tropas dejan de sufrir su propio gas lacrimógeno.',
+    price: 250,
+  },
+  municion: {
+    id: 'municion',
+    name: 'Munición extra',
+    icon: '🧰',
+    description: 'Granaderos, escopeteros y camiones lanzagás llevan un 50% más de munición.',
     price: 300,
   },
   concreto: {
@@ -45,7 +76,7 @@ export const UPGRADES: Record<UpgradeId, UpgradeDef> = {
     id: 'megafonos',
     name: 'Megáfonos y negociadores',
     icon: '📢',
-    description: 'Con contención, la multitud se calma 2,5 veces más rápido.',
+    description: 'Con contención o negociadores, la multitud se calma 2,5 veces más rápido.',
     price: 350,
   },
   propaganda: {
@@ -62,6 +93,8 @@ export interface UpgradeEffects {
   waterMult: number;
   calmMult: number;
   projectileDamageMult: number;
+  ammoMult: number;
+  gasImmune: boolean;
 }
 
 export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
@@ -71,12 +104,24 @@ export function upgradeEffects(owned: readonly UpgradeId[]): UpgradeEffects {
     integrityMult: {
       soldier: armor,
       shield: armor,
+      gasser: 1,
+      shotgun: 1,
+      moto: 1,
+      capture: 1,
+      negotiator: 1,
       barricade: has('concreto') ? 2 : 1,
       ballena: 1,
+      gastruck: 1,
       tanqueta: 1,
+      bulldozer: 1,
+      helicopter: 1,
+      supply: 1,
+      army: 1,
     },
     waterMult: has('tanques') ? 1.6 : 1,
     calmMult: has('megafonos') ? 2.5 : 1,
     projectileDamageMult: has('cascos') ? 0.6 : 1,
+    ammoMult: has('municion') ? 1.5 : 1,
+    gasImmune: has('mascaras'),
   };
 }

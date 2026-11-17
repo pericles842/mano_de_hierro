@@ -1,6 +1,6 @@
 import { CROWD_STAGES } from '../data/crowdStages';
 import { FORCE_LEVELS } from '../data/forceLevels';
-import { UNITS, UNIT_ORDER, type UnitType } from '../data/units';
+import { CATEGORY_NAMES, UNITS, UNIT_ORDER, type UnitCategory, type UnitType } from '../data/units';
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { Unit } from '../sim/riot/types';
 import { h } from './dom';
@@ -33,6 +33,7 @@ export class RiotHud {
   private readonly banner: HTMLElement;
   private readonly toasts: HTMLElement;
   private readonly cards = new Map<UnitType, { el: HTMLElement; count: HTMLElement }>();
+  private readonly tabs: HTMLButtonElement[] = [];
   private readonly forceButtons: HTMLButtonElement[];
   private readonly speedButtons: { el: HTMLButtonElement; speed: number }[];
   private readonly pauseButton: HTMLButtonElement;
@@ -88,26 +89,39 @@ export class RiotHud {
       this.muteButton,
     ]);
 
-    const unitBar = h('div', { class: 'unit-bar' });
+    // Barra de tropas por pestañas: Policía · Vehículos y defensas · Ejército.
+    const cardRow = h('div', { class: 'unit-cards' });
+    const tabRow = h('div', { class: 'unit-tabs' });
+    const categories = Object.keys(CATEGORY_NAMES) as UnitCategory[];
+    for (const cat of categories) {
+      const tab = h('button', { class: 'unit-tab', text: CATEGORY_NAMES[cat], onClick: () => this.setTab(cat) });
+      tab.dataset.category = cat;
+      this.tabs.push(tab);
+      tabRow.append(tab);
+    }
     for (const type of UNIT_ORDER) {
       const def = UNITS[type];
       const count = h('span', { class: 'unit-count' });
-      const el = h('div', { class: 'unit-card', title: def.description }, [
+      const tip = type === 'army' ? `${def.description} Se consigue decretando Estado de Excepción en el despacho.` : def.description;
+      const el = h('div', { class: 'unit-card', title: `${def.name}: ${tip}` }, [
         h('div', { class: 'unit-icon', text: def.icon }),
         h('div', { class: 'unit-name', text: def.name }),
         count,
       ]);
+      el.dataset.category = def.category;
       el.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         handlers.onCardPress(type);
       });
       this.cards.set(type, { el, count });
-      unitBar.append(el);
+      cardRow.append(el);
     }
+    const unitBar = h('div', { class: 'unit-bar' }, [tabRow, cardRow]);
+    this.setTab('policia');
 
     const help = h('div', { class: 'riot-help' }, [
-      h('div', { text: 'Colocar: clic en una tropa y clic en el mapa · Shift: hilera · Shift + rueda: cuántas.' }),
+      h('div', { text: 'Colocar: clic en una tropa y clic en el mapa · Shift: hilera · Shift + rueda: cuántas · R: girar.' }),
       h('div', { text: 'Seleccionar: arrastra un recuadro · Shift: añadir · Doble clic: todas las de ese tipo.' }),
       h('div', { text: 'Clic derecho: mover en formación (o cancelar la colocación).' }),
       h('div', { text: 'Cámara: WASD, bordes o botón central · Q/E: rotar · Rueda: zoom · 1-4: fuerza · M: sonido' }),
@@ -115,6 +129,11 @@ export class RiotHud {
 
     this.root = h('div', { class: 'riot-hud' }, [top, force, speed, unitBar, this.selected, help, this.toasts, this.banner]);
     parent.append(this.root);
+  }
+
+  setTab(category: UnitCategory): void {
+    for (const tab of this.tabs) tab.classList.toggle('active', tab.dataset.category === category);
+    for (const card of this.cards.values()) card.el.style.display = card.el.dataset.category === category ? '' : 'none';
   }
 
   setArmed(type: UnitType | null): void {
@@ -157,7 +176,10 @@ export class RiotHud {
       const unit = selected[0];
       const def = UNITS[unit.type];
       const parts = [`${def.icon} ${def.name}`, `Integridad ${Math.ceil((unit.integrity / unit.maxIntegrity) * 100)}%`];
+      if (def.infantry) parts.push(unit.retreating ? '⚠ Replegándose' : `Moral ${Math.round(unit.morale * 100)}%`);
+      if (unit.refusing > 0) parts.push('⚠ Se niega a actuar');
       if (def.water) parts.push(`Agua ${Math.ceil(unit.water)} s`);
+      if (unit.maxAmmo > 0) parts.push(`Munición ${Math.floor(unit.ammo)}/${unit.maxAmmo}`);
       parts.push(def.speed > 0 ? 'Clic derecho: mover' : 'Fija');
       this.selected.textContent = parts.join(' · ');
     } else if (selected.length > 1) {

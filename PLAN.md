@@ -172,3 +172,12 @@ Simplificaciones respecto al plan: entidades como objetos tipados en lugar de un
 - Fases de la multitud según su ira: Pacífica (marchan y se detienen a cantar) → Tensa (piedras) → Disturbios (palos) → Caos (bombas incendiarias).
   15 s de concentración inicial para colocar barricadas; oleadas más frecuentes cuanto más enfadada está la gente; la contención calma.
 - Sonido sintetizado con Web Audio (sin archivos): multitud, consignas, cacerolas, agua, gas, perdigones, sirenas, fuego.
+
+## Cambios v0.4
+- Unidades: granadero de gas (nubes que arrastra el viento), escopetero, motorizados, equipo de captura (arresta líderes),
+  negociador, camión lanzagás, topadora (apaga cauchos), helicóptero (vuela, reflector), camión de suministros (recarga).
+- Ejército: solo con Estado de Excepción (decreto diario). Con lealtad baja puede negarse a actuar o desertar.
+- Manifestantes: escuderos, prensa (si usas la fuerza cerca, sube la presión internacional), brigadas médicas, máscaras caseras.
+- Munición limitada, moral de la infantería (se repliega), tecla R para girar la hilera, barra de tropas por pestañas.
+- Noticiero en vivo (TV PATRIA oficial vs MUNDO 24H internacional) en el menú y durante la revuelta.
+- Despacho rediseñado con pestañas: Revueltas · Economía · Ejército · Diplomacia (6 acciones diplomáticas diarias).

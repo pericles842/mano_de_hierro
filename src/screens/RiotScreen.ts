@@ -6,6 +6,7 @@ import { CROWD_STAGES } from '../data/crowdStages';
 import type { SpawnId } from '../data/riots';
 import { UNITS, type UnitType } from '../data/units';
 import { RtsCamera } from '../input/RtsCamera';
+import { riotHeadline, type NewsFeed } from '../news/NewsFeed';
 import { RiotView, type GhostPlacement } from '../render/RiotView';
 import type { RiotSim } from '../sim/riot/RiotSim';
 import type { RiotResult, Unit } from '../sim/riot/types';
@@ -18,6 +19,7 @@ export interface RiotScreenOptions {
   sim: RiotSim;
   loop: GameLoop;
   cityName: string;
+  news: NewsFeed;
   onFinished(result: RiotResult): void;
 }
 
@@ -50,6 +52,7 @@ export class RiotScreen implements Screen {
   /** Tropa "en la mano": se ve en transparente bajo el ratón hasta colocarla. */
   private placeType: UnitType | null = null;
   private rowCount = 5;
+  private rowAngle = 0;
   private shiftHeld = false;
   private pressedOnCard = false;
   private mouse: Point | null = null;
@@ -98,6 +101,17 @@ export class RiotScreen implements Screen {
     this.view.handleEvents(events);
     audio.handleRiotEvents(events);
     for (const e of events) {
+      const headline = riotHeadline(e, this.sim.def, this.o.cityName);
+      if (headline) this.o.news.pushBreaking(headline[0], headline[1], 15);
+      if (e.type === 'retreat') {
+        this.hud.toast(`${UNITS[e.unitType].icon} ${UNITS[e.unitType].name}: moral rota, se repliegan`, 'bad');
+      } else if (e.type === 'refuse') {
+        this.hud.toast('🪖 ¡Un pelotón se niega a actuar! (lealtad baja)', 'bad');
+      } else if (e.type === 'desert') {
+        this.hud.toast('🪖 ¡Soldados desertan y se unen a la multitud!', 'bad');
+      } else if (e.type === 'press') {
+        this.hud.toast('📸 La prensa lo grabó todo: sube la presión internacional', 'bad');
+      }
       if (e.type === 'escalate') {
         const s = CROWD_STAGES[e.stage];
         this.hud.toast(
@@ -185,9 +199,14 @@ export class RiotScreen implements Screen {
 
     // La hilera va a lo ancho de la pantalla y las tropas miran hacia la cámara (hacia la multitud).
     this.forward.subVectors(this.camera.controls.target, this.view.camera.position).setY(0).normalize();
-    const rightX = -this.forward.z;
-    const rightZ = this.forward.x;
-    const heading = Math.atan2(-this.forward.x, -this.forward.z);
+    // Tecla R: gira la hilera de 45 en 45 grados.
+    const c = Math.cos(this.rowAngle);
+    const s = Math.sin(this.rowAngle);
+    const fx = this.forward.x * c - this.forward.z * s;
+    const fz = this.forward.x * s + this.forward.z * c;
+    const rightX = -fz;
+    const rightZ = fx;
+    const heading = Math.atan2(-fx, -fz);
     const spacing = UNITS[type].rowSpacing;
     const n = this.shiftHeld ? Math.max(1, Math.min(this.rowCount, this.sim.available[type])) : 1;
 
@@ -211,8 +230,8 @@ export class RiotScreen implements Screen {
     }
     const def = UNITS[this.placeType];
     this.cursorTip.textContent = this.shiftHeld
-      ? `${def.icon} Hilera ×${placement.list.length} · rueda: ±1`
-      : `${def.icon} ${def.name} · Shift: hilera`;
+      ? `${def.icon} Hilera ×${placement.list.length} · rueda: ±1 · R: girar`
+      : `${def.icon} ${def.name} · Shift: hilera · R: girar`;
     this.cursorTip.style.display = '';
     this.cursorTip.style.transform = `translate(${this.mouse.x + 16}px, ${this.mouse.y + 18}px)`;
   }
@@ -230,7 +249,6 @@ export class RiotScreen implements Screen {
       return;
     }
     audio.play('place');
-    if (type === 'ballena' || type === 'tanqueta') audio.play('siren');
     if (this.sim.available[type] <= 0) this.disarm();
   }
 
@@ -403,6 +421,9 @@ export class RiotScreen implements Screen {
       else this.selected.clear();
     } else if (e.code === 'KeyM') {
       audio.toggleMute();
+    } else if (e.code === 'KeyR' && this.placeType) {
+      this.rowAngle = (this.rowAngle + Math.PI / 4) % (Math.PI * 2);
+      audio.play('click');
     } else if (/^Digit[1-4]$/.test(e.code)) {
       this.sim.setForce(Number(e.code.slice(5)) - 1);
     }

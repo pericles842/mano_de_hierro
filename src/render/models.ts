@@ -2,8 +2,18 @@ import * as THREE from 'three';
 import type { UnitType } from '../data/units';
 import { VoxelBuilder } from './voxel';
 
-export type CrowdModel = 'pacifico0' | 'pacifico1' | 'pacifico2' | 'radical' | 'lider' | 'palo' | 'molotov';
-/** Índices 0-4 = `Protester.model` de la simulación; 5-6 = variantes armadas. */
+export type CrowdModel =
+  | 'pacifico0'
+  | 'pacifico1'
+  | 'pacifico2'
+  | 'radical'
+  | 'lider'
+  | 'palo'
+  | 'molotov'
+  | 'escudero'
+  | 'prensa'
+  | 'medico';
+/** Índices 0-4 = `Protester.model` de la simulación; 5+ = variantes por arma o tipo. */
 export const CROWD_MODELS: readonly CrowdModel[] = [
   'pacifico0',
   'pacifico1',
@@ -12,10 +22,16 @@ export const CROWD_MODELS: readonly CrowdModel[] = [
   'lider',
   'palo',
   'molotov',
+  'escudero',
+  'prensa',
+  'medico',
 ];
 export const MODEL_PALO = 5;
 export const MODEL_MOLOTOV = 6;
-export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker';
+export const MODEL_ESCUDERO = 7;
+export const MODEL_PRENSA = 8;
+export const MODEL_MEDICO = 9;
+export type ModelKey = CrowdModel | UnitType | 'palace' | 'tree' | 'lamp' | 'marker' | 'rotor';
 
 /** Material compartido por todos los modelos voxel (el color va en los vértices). */
 export const VOXEL_MATERIAL = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -48,6 +64,34 @@ function buildModel(key: ModelKey): THREE.BufferGeometry {
       return stickModel();
     case 'molotov':
       return molotovModel();
+    case 'escudero':
+      return escuderoModel();
+    case 'prensa':
+      return prensaModel();
+    case 'medico':
+      return medicoModel();
+    case 'gasser':
+      return gasserModel();
+    case 'shotgun':
+      return shotgunModel();
+    case 'moto':
+      return motoModel();
+    case 'capture':
+      return captureModel();
+    case 'negotiator':
+      return negotiatorModel();
+    case 'gastruck':
+      return gastruckModel();
+    case 'bulldozer':
+      return bulldozerModel();
+    case 'helicopter':
+      return helicopterModel();
+    case 'rotor':
+      return rotorModel();
+    case 'supply':
+      return supplyModel();
+    case 'army':
+      return armyModel();
     case 'soldier':
       return soldierModel();
     case 'shield':
@@ -164,7 +208,177 @@ function shieldWallModel(): THREE.BufferGeometry {
   return b.build({ size: PERSON_SIZE, center: true });
 }
 
+// ─── Manifestantes especiales ────────────────────────────────────────────
+
+function escuderoModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  person(b, 0, 0, { shirt: 0x4b5563, pants: 0x1f2937, skin: 0xc68642, hair: 0x111111 });
+  b.box(0, 8, 0, 3, 9, 1, 0x2563eb); // casco de bici
+  b.box(-2, 1, 2, 5, 7, 2, 0x8b5a2b); // escudo casero de madera
+  b.box(-2, 4, 2, 5, 4, 2, 0x6b4423);
+  b.box(0, 5, 2, 3, 6, 2, 0xdc2626); // pintado con un mensaje
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function prensaModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  person(b, 0, 0, { shirt: 0x1d4ed8, pants: 0x374151, skin: 0xe0ac69, hair: 0x5a3a1a });
+  b.box(0, 4, 1, 3, 4, 1, 0xfafafa); // PRENSA en el chaleco
+  b.box(3, 7, 2, 5, 8, 3, 0x111111); // cámara al hombro
+  b.set(4, 7, 4, 0x60a5fa);
+  b.box(4, 4, 1, 4, 6, 1, 0x1d4ed8);
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function medicoModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  person(b, 0, 0, { shirt: 0xf8fafc, pants: 0x94a3b8, skin: 0xc68642, hair: 0x111111 });
+  b.box(1, 3, 1, 2, 5, 1, 0xdc2626).box(0, 4, 1, 3, 4, 1, 0xdc2626); // cruz roja
+  b.box(0, 8, 0, 3, 8, 1, 0xf8fafc).set(1, 9, 1, 0xdc2626);
+  b.box(4, 1, 1, 5, 2, 2, 0xdc2626); // botiquín
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+// ─── Policía especializada y ejército ────────────────────────────────────
+
+function gasserModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  soldierBody(b, 0);
+  b.box(1, 6, 2, 2, 7, 2, 0x166534); // máscara antigás
+  b.set(1, 6, 3, 0x111111).set(2, 6, 3, 0x111111);
+  b.box(4, 4, 1, 4, 4, 5, 0x374151); // lanzagranadas
+  b.box(4, 3, 4, 4, 5, 5, 0x1f2937);
+  b.box(-1, 2, 0, -1, 3, 0, 0x84cc16).box(4, 2, 0, 4, 3, 0, 0x84cc16); // botes en el cinturón
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function shotgunModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  soldierBody(b, 0);
+  b.box(1, 7, 2, 2, 8, 2, 0x93c5fd);
+  b.box(3, 4, 1, 4, 4, 6, 0x1f2937); // escopeta
+  b.box(3, 4, 1, 4, 4, 2, 0xf97316); // culata naranja: munición de goma
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function captureModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  const black = 0x111827;
+  for (const ox of [0, 6]) {
+    person(b, ox, 0, { shirt: black, pants: black, skin: 0xe0ac69, hair: black });
+    b.box(ox + 1, 7, 1, ox + 2, 7, 1, 0x111111); // gafas oscuras
+    b.box(ox, 8, 0, ox + 3, 9, 1, black);
+  }
+  b.box(3, 4, 1, 6, 4, 1, 0x9ca3af); // esposas
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function negotiatorModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  person(b, 0, 0, { shirt: 0xf8fafc, pants: 0x1e3a8a, skin: 0xe0ac69, hair: 0x6b7280 });
+  b.box(1, 3, 1, 1, 5, 1, 0x1e3a8a); // corbata
+  b.box(4, 6, 1, 4, 7, 1, 0xf8fafc); // brazo en alto
+  b.box(4, 8, 1, 5, 9, 3, 0xfacc15); // megáfono
+  b.set(5, 9, 4, 0xfde047);
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function armyModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  const camo = 0x4d5b2e;
+  for (const ox of [0, 6, 12]) {
+    person(b, ox, 0, { shirt: camo, pants: 0x3f4a25, skin: 0xc68642, hair: 0x111111 });
+    b.box(ox, 8, 0, ox + 3, 9, 1, 0x3f4a25); // casco
+    b.box(ox + 1, 10, 0, ox + 2, 10, 1, 0x3f4a25);
+    b.set(ox, 4, 1, 0x6b7c3a).set(ox + 3, 5, 0, 0x6b7c3a); // manchas de camuflaje
+    b.box(ox + 4, 3, 1, ox + 4, 9, 1, 0x1f2937); // fusil al hombro, apuntando al cielo
+  }
+  b.box(-1, 0, -1, 16, 0, -1, 0x2d3520); // sombra de botas
+  return b.build({ size: PERSON_SIZE, center: true });
+}
+
+function motoModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  b.box(1, 0, 0, 2, 2, 1, 0x111111).box(1, 0, 8, 2, 2, 9, 0x111111); // ruedas
+  b.box(1, 2, 1, 2, 3, 8, 0x1e3a5f); // chasis
+  b.box(0, 3, 6, 3, 4, 8, 0xe5e7eb); // carenado
+  b.set(1, 4, 9, 0xfde047).set(2, 4, 9, 0xfde047);
+  b.box(1, 5, 7, 2, 5, 7, 0x3b82f6); // sirena
+  // Piloto
+  b.box(1, 4, 3, 2, 6, 4, 0x1e3a5f);
+  b.box(0, 5, 4, 3, 6, 5, 0x1e3a5f);
+  b.box(1, 7, 3, 2, 8, 4, 0x0f172a); // casco
+  b.box(0, 3, 3, 0, 4, 4, 0x172a45).box(3, 3, 3, 3, 4, 4, 0x172a45);
+  return b.build({ size: 0.22, center: true });
+}
+
 // ─── Estructuras y vehículos ─────────────────────────────────────────────
+
+function truckBase(b: VoxelBuilder, body: number): void {
+  b.box(0, 1, 0, 9, 2, 19, 0x4b5563);
+  b.box(0, 3, 14, 9, 8, 19, body); // cabina
+  b.box(1, 6, 19, 8, 8, 19, 0x5aa0d8);
+  b.box(0, 6, 15, 0, 7, 18, 0x5aa0d8).box(9, 6, 15, 9, 7, 18, 0x5aa0d8);
+  b.set(1, 4, 19, 0xfde047).set(8, 4, 19, 0xfde047);
+  wheels(b, [2, 8, 15], 10);
+}
+
+function gastruckModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  truckBase(b, 0x3f3f46);
+  b.box(0, 3, 0, 9, 7, 13, 0x52525b); // caja blindada
+  b.box(2, 8, 4, 7, 9, 10, 0x27272a); // torreta lanzagás
+  for (const x of [2, 4, 6]) b.box(x, 10, 7, x + 1, 10, 12, 0x84cc16); // tubos
+  b.box(0, 5, 0, 0, 5, 13, 0xfacc15).box(9, 5, 0, 9, 5, 13, 0xfacc15);
+  return b.build({ size: 0.25, center: true });
+}
+
+function supplyModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  truckBase(b, 0x4d5b2e);
+  b.box(0, 3, 0, 9, 8, 13, 0x6b7c3a); // lona
+  for (const z of [1, 5, 9]) b.box(-1, 3, z, -1, 5, z + 2, 0x8b5a2b).box(10, 3, z, 10, 5, z + 2, 0x8b5a2b); // cajas
+  b.box(3, 9, 5, 6, 9, 8, 0xf8fafc).box(4, 9, 4, 5, 9, 9, 0xdc2626);
+  return b.build({ size: 0.25, center: true });
+}
+
+function bulldozerModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  const YELLOW = 0xeab308;
+  b.box(-1, 0, 1, 0, 2, 14, 0x1f2937).box(9, 0, 1, 10, 2, 14, 0x1f2937); // orugas
+  b.box(1, 2, 1, 8, 5, 12, YELLOW);
+  b.box(2, 6, 3, 7, 10, 8, YELLOW); // cabina
+  b.box(3, 8, 8, 6, 9, 8, 0x5aa0d8);
+  b.box(-2, 0, 16, 11, 5, 17, 0x9ca3af); // pala
+  b.box(-2, 0, 17, 11, 0, 17, 0x6b7280);
+  b.box(3, 3, 13, 6, 4, 15, 0x374151);
+  b.box(7, 11, 4, 7, 12, 4, 0xf97316); // baliza
+  return b.build({ size: 0.25, center: true });
+}
+
+function helicopterModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  const BODY = 0x1e3a5f;
+  b.box(0, 2, 4, 5, 6, 13, BODY); // fuselaje
+  b.box(1, 4, 13, 4, 6, 15, 0x5aa0d8); // cabina acristalada
+  b.box(2, 4, -6, 3, 5, 3, BODY); // cola
+  b.box(2, 5, -7, 3, 8, -6, BODY);
+  b.box(1, 7, -7, 4, 7, -7, 0xfacc15);
+  b.box(-1, 0, 5, -1, 0, 12, 0x111111).box(6, 0, 5, 6, 0, 12, 0x111111); // patines
+  b.box(-1, 1, 6, -1, 1, 6, 0x374151).box(6, 1, 6, 6, 1, 6, 0x374151);
+  b.box(2, 7, 8, 3, 7, 9, 0x374151); // mástil del rotor
+  b.box(2, 1, 12, 3, 1, 13, 0xfef08a); // reflector
+  b.box(0, 4, 8, 0, 4, 10, 0xf8fafc).box(5, 4, 8, 5, 4, 10, 0xf8fafc);
+  return b.build({ size: 0.3, center: true });
+}
+
+function rotorModel(): THREE.BufferGeometry {
+  const b = new VoxelBuilder();
+  b.box(-14, 0, 0, 14, 0, 0, 0x27272a);
+  b.box(0, 0, -14, 0, 0, 14, 0x27272a);
+  return b.build({ size: 0.3, center: true, jitter: 0 });
+}
+
 
 function barricadeModel(): THREE.BufferGeometry {
   const b = new VoxelBuilder();

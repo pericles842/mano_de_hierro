@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../src/core/Random';
 import { EVENTS } from '../src/data/events';
 import { RIOTS } from '../src/data/riots';
-import type { UnitType } from '../src/data/units';
+import { makeStock } from './helpers';
 import { applyEventOption, buyUpgrade, createRegime, endDay, rollEvent } from '../src/sim/regime';
 import { PREP_TIME, RiotSim } from '../src/sim/riot/RiotSim';
 
-const STOCK: Record<UnitType, number> = { soldier: 20, shield: 6, barricade: 12, ballena: 1, tanqueta: 1 };
+const STOCK = makeStock({ soldier: 20, shield: 6, barricade: 12, ballena: 1, tanqueta: 1 });
 
 function run(sim: RiotSim, seconds: number): void {
   for (let t = 0; t < seconds && !sim.result; t += 1 / 30) sim.step(1 / 30);

@@ -23,6 +23,11 @@ const result = (over: Partial<RiotResult>): RiotResult => ({
   palaceHp: 80,
   peakStage: 0,
   finalAnger: 0.2,
+  arrests: 0,
+  pressIncidents: 0,
+  armyDeployed: 0,
+  deserted: 0,
+  harshness: 0,
   ...over,
 });
 

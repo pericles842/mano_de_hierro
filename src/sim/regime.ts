@@ -1,5 +1,6 @@
 import type { Random } from '../core/Random';
 import { CAMPAIGN_DAYS, DEFAULT_NAMES } from '../data/country';
+import { DIPLOMACY, diplomacyBlocked, type DiplomacyId } from '../data/diplomacy';
 import { EVENTS, type EventOption, type GameEventDef } from '../data/events';
 import { RIOTS, RIOT_LIST, type RiotDef, type RiotId } from '../data/riots';
 import { UNITS, UNIT_ORDER, type UnitType } from '../data/units';
@@ -40,6 +41,10 @@ export interface RegimeState extends PlayerNames {
   unrest: number;
   stock: Record<UnitType, number>;
   upgrades: UpgradeId[];
+  /** Estado de Excepción decretado hoy: el ejército está disponible. */
+  emergency: boolean;
+  /** Acciones diplomáticas ya usadas hoy. */
+  diplomacyUsed: DiplomacyId[];
   /** Eventos recientes, para no repetirlos seguidos. */
   recentEvents: string[];
   activeRiots: RiotInstance[];
@@ -74,8 +79,26 @@ export function createRegime(rng: Random, names: PlayerNames = DEFAULT_NAMES): R
     intlPressure: 10,
     loyalty: 65,
     unrest: 20,
-    stock: { soldier: 14, shield: 3, barricade: 6, ballena: 1, tanqueta: 0 },
+    stock: {
+      soldier: 14,
+      shield: 3,
+      gasser: 2,
+      shotgun: 0,
+      moto: 0,
+      capture: 1,
+      negotiator: 1,
+      barricade: 6,
+      ballena: 1,
+      gastruck: 0,
+      tanqueta: 0,
+      bulldozer: 0,
+      helicopter: 0,
+      supply: 0,
+      army: 0,
+    },
     upgrades: [],
+    emergency: false,
+    diplomacyUsed: [],
     recentEvents: [],
     activeRiots: [],
     status: 'playing',
@@ -91,6 +114,38 @@ export function buyUnit(state: RegimeState, type: UnitType): boolean {
   state.treasury -= price;
   state.stock[type]++;
   return true;
+}
+
+export const EMERGENCY_ARMY_SQUADS = 6;
+export const EMERGENCY_COST: Deltas = { treasury: 0, popularity: -5, intlPressure: 10, loyalty: 2, unrest: 8 };
+
+/** Decreta el Estado de Excepción por un día: llegan pelotones del ejército, pero el mundo mira. */
+export function declareEmergency(state: RegimeState): Deltas | null {
+  if (state.emergency) return null;
+  state.emergency = true;
+  state.stock.army = EMERGENCY_ARMY_SQUADS;
+  const d = { ...EMERGENCY_COST };
+  applyDeltas(state, d);
+  return d;
+}
+
+/** Usa una acción diplomática (una vez por día). Devuelve los cambios, o null si no se puede. */
+export function useDiplomacy(state: RegimeState, id: DiplomacyId): Deltas | null {
+  const action = DIPLOMACY.find((a) => a.id === id);
+  if (!action || state.diplomacyUsed.includes(id) || diplomacyBlocked(action, state.intlPressure)) return null;
+  const e = action.effects;
+  if (e.treasury !== undefined && e.treasury < 0 && state.treasury < -e.treasury) return null;
+  const d: Deltas = {
+    treasury: e.treasury ?? 0,
+    popularity: e.popularity ?? 0,
+    intlPressure: e.intlPressure ?? 0,
+    loyalty: e.loyalty ?? 0,
+    unrest: e.unrest ?? 0,
+  };
+  state.diplomacyUsed.push(id);
+  applyDeltas(state, d);
+  checkStatus(state);
+  return d;
 }
 
 export function buyUpgrade(state: RegimeState, id: UpgradeId): boolean {
@@ -167,6 +222,11 @@ export function applyRiotResult(state: RegimeState, result: RiotResult, def: Rio
     d.treasury -= 250;
     d.unrest += 6 + result.avgForce * 5; // una victoria del pueblo envalentona a todos
   }
+  // Métodos usados: arrestos, gas/perdigones, ejército y lo que grabó la prensa.
+  d.unrest += result.arrests * 1.5 + result.harshness * 0.1 + result.armyDeployed * 1;
+  d.intlPressure += (result.pressIncidents * 2 + result.armyDeployed * 4 + result.harshness * 0.05) * sens;
+  d.popularity -= result.pressIncidents * 0.5;
+  d.loyalty -= result.deserted * 3;
   applyDeltas(state, d);
   return d;
 }
@@ -206,6 +266,9 @@ export function endDay(state: RegimeState, handledUid: number | null, rng: Rando
   }
 
   state.day++;
+  state.emergency = false;
+  state.stock.army = 0;
+  state.diplomacyUsed = [];
   checkStatus(state);
   state.activeRiots = [];
   if (state.status === 'playing') rollRiots(state, rng);
